@@ -1,0 +1,7 @@
+# JobTracker's backend (backend/server.py, database.py, repository.py) uses
+# only the Python standard library: http.server, sqlite3, csv, json, and
+# datetime. No `pip install` is required to run the app as of this phase.
+#
+# This file is kept in place for later phases (e.g. a Gmail-polling worker
+# or an AI-classification client) that will introduce real dependencies
+# such as `google-api-python-client` or `anthropic`.

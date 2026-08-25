@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>JobTrace</title>
+<link rel="icon" type="image/png" href="/assets/logo.png" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+<div id="toast-container" class="toast-container"></div>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="brand">
+      <img class="brand-mark" src="/assets/logo.png" alt="" />
+      <span class="brand-name">JobTrace</span>
+    </div>
+    <nav class="tabs" id="main-tabs">
+      <button class="tab active" data-view="dashboard">Dashboard</button>
+      <button class="tab" data-view="analytics">Analytics</button>
+    </nav>
+  </div>
+  <div class="topbar-right">
+    <button class="gmail-status-pill" id="gmail-status-btn" type="button">
+      <span class="gmail-status-icon" id="gmail-status-icon"></span>
+      <span id="gmail-status-text">Gmail not synced yet</span>
+    </button>
+    <div class="dropdown" id="export-dropdown">
+      <button class="btn btn-ghost" id="export-btn">Export ▾</button>
+      <div class="dropdown-menu" id="export-menu">
+        <a href="/api/export/csv" class="dropdown-item" id="export-csv">Export as CSV</a>
+        <a href="/api/export/json" class="dropdown-item" id="export-json">Export as JSON</a>
+        <button class="dropdown-item" id="backup-db">Back up database</button>
+        <label class="dropdown-item" id="import-csv-label">
+          Import from CSV
+          <input type="file" id="import-csv-input" accept=".csv" hidden />
+        </label>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="add-application-btn">+ Add Application</button>
+  </div>
+</header>
+
+<main class="app-main">
+
+  <!-- DASHBOARD VIEW: at-a-glance charts on top, summary cards under -->
+  <section id="view-dashboard" class="view active">
+
+    <div class="panel chart-switcher-panel">
+      <div class="panel-header">
+        <div>
+          <h3 id="chart-switcher-title">Applications per day</h3>
+          <p class="panel-subtitle" id="chart-switcher-subtitle">Number of job applications submitted each day</p>
+        </div>
+      </div>
+
+      <div class="chart-tabs" id="chart-tabs">
+        <button class="chart-tab active" data-chart="daily">Daily Activity</button>
+        <button class="chart-tab" data-chart="donut">Stage Distribution</button>
+        <button class="chart-tab" data-chart="journey">Progress</button>
+      </div>
+
+      <div class="chart-view active" id="chart-view-daily">
+        <div class="chart-view-toolbar">
+          <div class="segmented" id="range-toggle">
+            <button data-range="7">7D</button>
+            <button data-range="14" class="active">14D</button>
+            <button data-range="30">30D</button>
+          </div>
+        </div>
+        <div class="mini-stats-row" id="daily-mini-stats"></div>
+        <div id="chart-daily-bars" class="chart-box"></div>
+      </div>
+
+      <div class="chart-view" id="chart-view-donut">
+        <div class="donut-layout">
+          <div id="chart-donut" class="donut-box"></div>
+          <div class="donut-legend" id="donut-legend"></div>
+        </div>
+        <div class="insight-callout" id="donut-insight"></div>
+      </div>
+
+      <div class="chart-view" id="chart-view-journey">
+        <div class="journey-header">
+          <span>Overall progress</span>
+          <span id="journey-goal-label">Offer stage</span>
+        </div>
+        <div id="chart-journey" class="journey-box"></div>
+      </div>
+    </div>
+
+    <div class="summary-grid" id="summary-cards">
+      <!-- populated by dashboard.js -->
+    </div>
+
+  </section>
+
+  <!-- ANALYTICS VIEW: the full filterable dataset, then source performance -->
+  <section id="view-analytics" class="view">
+    <div class="analytics-grid">
+
+      <div class="panel span-2">
+        <div class="panel-header"><h3>All applications</h3></div>
+        <div class="filter-bar">
+          <div class="search-field">
+            <input type="text" id="search-input" placeholder="Search company or position…" />
+          </div>
+          <select id="filter-stage" class="filter-select">
+            <option value="">All stages</option>
+          </select>
+          <select id="filter-outcome" class="filter-select">
+            <option value="">All outcomes</option>
+          </select>
+          <select id="filter-company" class="filter-select">
+            <option value="">All companies</option>
+          </select>
+          <input type="date" id="filter-date-from" class="filter-date" title="From date" />
+          <span class="filter-date-sep">–</span>
+          <input type="date" id="filter-date-to" class="filter-date" title="To date" />
+          <button class="btn btn-ghost btn-sm" id="clear-filters-btn">Clear filters</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table" id="applications-table">
+            <thead>
+              <tr>
+                <th data-sort="company">Company</th>
+                <th data-sort="position">Position</th>
+                <th data-sort="location">Location</th>
+                <th data-sort="application_date">Applied</th>
+                <th data-sort="current_stage">Stage</th>
+                <th data-sort="outcome">Outcome</th>
+                <th data-sort="source">Source</th>
+                <th data-sort="days_since_application">Days</th>
+              </tr>
+            </thead>
+            <tbody id="applications-tbody">
+            </tbody>
+          </table>
+          <div class="empty-state" id="table-empty-state" hidden>
+            <p>No applications match these filters.</p>
+          </div>
+        </div>
+
+        <div class="pagination-bar">
+          <span class="pagination-info" id="pagination-info"></span>
+          <div class="pagination-controls">
+            <button class="btn btn-ghost btn-sm" id="prev-page-btn">← Prev</button>
+            <span id="page-indicator"></span>
+            <button class="btn btn-ghost btn-sm" id="next-page-btn">Next →</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel span-2">
+        <div class="panel-header"><h3>Source performance</h3></div>
+        <div class="table-wrap">
+          <table class="data-table" id="source-performance-table">
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Applications</th>
+                <th>Response rate</th>
+                <th>Positive rate</th>
+                <th>Interview rate</th>
+              </tr>
+            </thead>
+            <tbody id="source-performance-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- ADD / EDIT APPLICATION SIDE PANEL -->
+<div class="overlay" id="app-form-overlay" hidden>
+  <div class="side-panel" id="app-form-panel">
+    <div class="side-panel-header">
+      <h2 id="app-form-title">Add Application</h2>
+      <button class="icon-btn" id="app-form-close">✕</button>
+    </div>
+    <form id="app-form" class="side-panel-body">
+      <input type="hidden" id="app-form-id" />
+
+      <div class="form-row">
+        <label for="f-company">Company *</label>
+        <input type="text" id="f-company" required maxlength="200" />
+      </div>
+      <div class="form-row">
+        <label for="f-position">Position *</label>
+        <input type="text" id="f-position" required maxlength="200" />
+      </div>
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="f-location">Location</label>
+          <input type="text" id="f-location" maxlength="200" />
+        </div>
+        <div class="form-row">
+          <label for="f-date">Application Date *</label>
+          <input type="date" id="f-date" required />
+        </div>
+      </div>
+
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="f-source">Source</label>
+          <select id="f-source"></select>
+        </div>
+        <div class="form-row" id="f-source-custom-row" hidden>
+          <label for="f-source-custom">Custom source</label>
+          <input type="text" id="f-source-custom" maxlength="100" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label for="f-job-url">Job URL</label>
+        <input type="url" id="f-job-url" maxlength="2000" placeholder="https://…" />
+      </div>
+
+      <div class="form-row-split">
+        <div class="form-row">
+          <label for="f-stage">Stage</label>
+          <select id="f-stage"></select>
+        </div>
+        <div class="form-row">
+          <label for="f-outcome">Outcome</label>
+          <select id="f-outcome"></select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label for="f-job-description">Job Description</label>
+        <textarea id="f-job-description" rows="6" maxlength="100000" placeholder="Paste the job description here…"></textarea>
+      </div>
+
+      <div class="form-row">
+        <label for="f-notes">Notes</label>
+        <textarea id="f-notes" rows="3" maxlength="50000"></textarea>
+      </div>
+
+      <div class="side-panel-footer">
+        <button type="button" class="btn btn-ghost" id="app-form-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="app-form-submit">Add Application</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- APPLICATION DETAIL SIDE PANEL -->
+<div class="overlay" id="detail-overlay" hidden>
+  <div class="side-panel side-panel-wide" id="detail-panel">
+    <div class="side-panel-header">
+      <h2 id="detail-position">—</h2>
+      <button class="icon-btn" id="detail-close">✕</button>
+    </div>
+    <div class="side-panel-body" id="detail-body">
+      <!-- populated by detail.js -->
+    </div>
+  </div>
+</div>
+
+<!-- EVENT ADD/EDIT MODAL -->
+<div class="overlay" id="event-form-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="event-form-title">Add Event</h3>
+      <button class="icon-btn" id="event-form-close">✕</button>
+    </div>
+    <form id="event-form" class="modal-body">
+      <input type="hidden" id="ev-application-id" />
+      <input type="hidden" id="ev-event-id" />
+      <div class="form-row">
+        <label for="ev-type">Event type</label>
+        <select id="ev-type"></select>
+      </div>
+      <div class="form-row" id="ev-type-custom-row" hidden>
+        <label for="ev-type-custom">Custom event type</label>
+        <input type="text" id="ev-type-custom" maxlength="100" />
+      </div>
+      <div class="form-row">
+        <label for="ev-date">Date</label>
+        <input type="date" id="ev-date" required />
+      </div>
+      <div class="form-row">
+        <label for="ev-description">Description</label>
+        <textarea id="ev-description" rows="3" maxlength="5000"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" id="event-form-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="event-form-submit">Save Event</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- CONFIRM DIALOG -->
+<div class="overlay" id="confirm-overlay" hidden>
+  <div class="modal-box modal-box-sm">
+    <div class="modal-header">
+      <h3 id="confirm-title">Are you sure?</h3>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-message"></p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" id="confirm-cancel">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirm-ok">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- IMPORT RESULT MODAL -->
+<div class="overlay" id="import-result-overlay" hidden>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="import-result-title">Import result</h3>
+      <button class="icon-btn" id="import-result-close">✕</button>
+    </div>
+    <div class="modal-body" id="import-result-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-primary" id="import-result-ok">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- GMAIL SYNC STATUS MODAL -->
+<div class="overlay" id="gmail-sync-overlay" hidden>
+  <div class="modal-box modal-box-lg">
+    <div class="modal-header">
+      <h3>Gmail synchronization</h3>
+      <button class="icon-btn" id="gmail-sync-close">✕</button>
+    </div>
+    <div class="modal-body" id="gmail-sync-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-primary" id="gmail-sync-ok">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/utils.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/charts.js"></script>
+<script src="/js/modal.js"></script>
+<script src="/js/detail.js"></script>
+<script src="/js/dashboard.js"></script>
+<script src="/js/analytics.js"></script>
+<script src="/js/importexport.js"></script>
+<script src="/js/gmailsync.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# Every install's own data is instance-specific — never ship or track it.
+data/*
+!data/.gitkeep
+backups/*
+!backups/.gitkeep
+
+# AI-assistant session/config folders some users will end up with locally.
+.claude/
+.codex/
+
+__pycache__/
+*.pyc
+
+# Local desktop shortcut — hardcodes an absolute path on this machine.
+JobTrace.lnk
