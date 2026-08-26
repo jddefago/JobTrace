@@ -1,7 +1,14 @@
 # JobTracker's backend (backend/server.py, database.py, repository.py) uses
 # only the Python standard library: http.server, sqlite3, csv, json, and
-# datetime. No `pip install` is required to run the app as of this phase.
+# datetime. No `pip install` is required to run the app itself, or for the
+# manual/assistant-driven Gmail sync described in GMAIL_SYNC.md.
 #
-# This file is kept in place for later phases (e.g. a Gmail-polling worker
-# or an AI-classification client) that will introduce real dependencies
-# such as `google-api-python-client` or `anthropic`.
+# The dependencies below are ONLY needed for backend/gmail_api_sync.py, the
+# headless Gmail sync that uses your own Google + Anthropic API keys instead
+# of an AI assistant app -- see GMAIL_SYNC_API.md. Skip `pip install` entirely
+# if you're not using that path.
+
+google-api-python-client>=2.100.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+anthropic>=0.40.0

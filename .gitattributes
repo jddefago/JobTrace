@@ -1,0 +1,19 @@
+# Force LF line endings for scripts that must run through a Unix/macOS
+# shebang, regardless of what core.autocrlf is set to on the machine that
+# clones or commits this repo -- a CRLF shebang line fails on macOS/Linux
+# with a "bad interpreter" error.
+*.sh text eol=lf
+*.command text eol=lf
+*.plist text eol=lf
+*.plist.example text eol=lf
+
+# Windows-only launcher scripts should keep CRLF.
+*.bat text eol=crlf
+*.vbs text eol=crlf
+
+# Binary files -- never let autocrlf inspect or rewrite these.
+*.pdf -text
+*.ico -text
+*.db -text
+*.png -text
+*.jpg -text

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    macOS launchd equivalent of a Windows Task Scheduler entry for JobTrace's
+    scheduled Gmail sync. Windows uses schtasks + run_gmail_sync_claude.bat /
+    run_gmail_sync_codex.bat; this is the same idea for macOS.
+
+    Setup:
+      1. Copy this file to ~/Library/LaunchAgents/com.jobtrace.gmailsync.plist
+         (the destination filename must match the Label below, and does NOT
+         keep the ".example" suffix).
+      2. Replace every __PROJECT_PATH__ below with this project folder's
+         absolute path (e.g. /Users/yourname/JobTrace), and __SCRIPT__ with
+         whichever runner you want scheduled:
+           run_gmail_sync_claude.sh  (Claude Code)
+           run_gmail_sync_codex.sh   (Codex CLI)
+           run_gmail_sync_api.sh     (headless, your own API keys -- see
+                                       GMAIL_SYNC_API.md)
+      3. Make sure that script is executable: chmod +x __PROJECT_PATH__/__SCRIPT__
+      4. Load it:   launchctl load ~/Library/LaunchAgents/com.jobtrace.gmailsync.plist
+         Unload it: launchctl unload ~/Library/LaunchAgents/com.jobtrace.gmailsync.plist
+         Check it:  launchctl list | grep jobtrace
+
+    StartInterval below is in seconds (21600 = every 6 hours, matching the
+    "every 6-8 hours is reasonable" guidance in SETUP.md). RunAtLoad is false
+    so loading the agent doesn't immediately fire a sync -- it waits for the
+    first interval to elapse.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jobtrace.gmailsync</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__PROJECT_PATH__/__SCRIPT__</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_PATH__</string>
+
+    <key>StartInterval</key>
+    <integer>21600</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__PROJECT_PATH__/data/sync_logs/launchd_stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_PATH__/data/sync_logs/launchd_stderr.log</string>
+</dict>
+</plist>

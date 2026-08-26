@@ -25,12 +25,16 @@ that's expected, not a bug.
   (or `python3 --version`). If it's missing, tell the user to install it
   from https://www.python.org/downloads/ and, on Windows, make sure
   **"Add python.exe to PATH"** is checked during install.
-- `requirements.txt` has nothing to install for this phase — the backend
-  uses only the Python standard library. Don't run `pip install` unless
-  you hit an actual `ModuleNotFoundError`.
-- The launcher scripts (`start.bat`, `stop.bat`, `start_hidden.vbs`) are
-  Windows-specific. If the user is on macOS/Linux, skip to the "Non-Windows"
-  note at the end of step 2 instead of trying to run the `.bat` files.
+- `requirements.txt` has nothing to install for the app itself, or for the
+  manual/assistant-driven Gmail sync — the backend uses only the Python
+  standard library. Don't run `pip install` unless you're setting up the
+  headless API Gmail sync (step 3, option C) or hit an actual
+  `ModuleNotFoundError`.
+- The launcher scripts come in two flavors: `start.bat`/`stop.bat`/
+  `start_hidden.vbs` for Windows, `start.command`/`stop.command` for macOS.
+  Both are checked into the repo — check the user's OS (from your own
+  environment context if you have it, otherwise ask) before step 2 so you
+  run the right one.
 
 ## 2. First run
 
@@ -54,44 +58,78 @@ that's expected, not a bug.
    `README.md`'s "Desktop shortcut" section, run from the project's
    *current* location.
 
-**Non-Windows (macOS/Linux):** there's no `.bat`/`.vbs` equivalent yet.
-Run the server directly from the project root:
+**macOS:**
+1. Make sure `start.command`/`stop.command` are executable (they're
+   committed with the exec bit set, so this is usually already true after a
+   `git clone`; if it was downloaded some other way — a zip, AirDrop, a
+   cloud-synced folder — run `chmod +x start.command stop.command` once
+   first).
+2. Run `./start.command` from the project root, or double-click it in
+   Finder (a Terminal window briefly appears, then the dashboard opens at
+   `http://localhost:8766` — the same non-hidden experience plain
+   `start.bat` gives on Windows; there's no fully-hidden launcher for macOS
+   yet).
+3. Confirm `data/applications.db` gets created automatically and the
+   dashboard loads with an empty state, same as the Windows steps above.
+4. To stop the server later: `./stop.command` (or double-click it).
+5. Offer to drag `start.command` onto the Dock or Desktop as a one-click
+   launcher, if the user wants that convenience.
 
-```bash
-python3 backend/server.py
-```
-
-Then open `http://localhost:8766` in a browser. Offer to write equivalent
-shell scripts (`start.sh`/`stop.sh`) if the user wants the same
-one-click convenience `start.bat` gives on Windows — that's a reasonable
-thing to build for them, just don't assume it already exists.
+**Linux:** not tested, but `python3 backend/server.py` directly should work
+unmodified (pure-stdlib server) — the `.command` script's logic (minus the
+macOS-specific `open` command, which would need to become `xdg-open`) should
+port over if the user wants the same convenience.
 
 ## 3. Optional: Gmail sync
 
 **Only do this if the user actually asks for it** — it's opt-in, not
 required for the tracker itself to work.
 
-Explain clearly: JobTrace has no Gmail integration of its own. Gmail sync
-works by *you* (or whichever assistant runs it) reading the user's Gmail
-through your own connector/MCP tool and writing results into JobTrace's
-local files — the assistant session is the integration, not the app.
+Explain clearly: JobTrace has no Gmail integration of its own. There are
+**three ways** to sync it, and the user should pick based on whether they
+want it automatic and whether they're OK with their own Anthropic API
+billing:
 
-- **One-off sync:** read `GMAIL_SYNC.md` in full first (it has a
-  "lessons from the first sync" section with mistakes worth not
-  repeating), then follow `GMAIL_SYNC_TASK_PROMPT.md`.
-- **Recurring/scheduled sync:** this needs two things the user sets up
-  themselves, not something you can fully configure from inside a
-  sandboxed session:
+**A. One-off, manual, free** — *you* (this assistant session) read the
+user's Gmail through your own connector/MCP tool and write results into
+JobTrace's local files directly — the assistant session is the integration,
+not the app. Read `GMAIL_SYNC.md` in full first (it has a "lessons from the
+first sync" section with mistakes worth not repeating), then follow
+`GMAIL_SYNC_TASK_PROMPT.md`.
+
+**B. Recurring, free, but requires an assistant app installed** — same
+mechanism as A, run on a schedule instead of on demand. This needs two
+things the user sets up themselves, not something you can fully configure
+from inside a sandboxed session:
   1. A Gmail MCP connector authorized under whichever CLI will run the
      scheduled task (Claude Code or Codex CLI) — done once, in that
      tool's own account/connector settings.
-  2. A Windows Task Scheduler entry pointed at `run_gmail_sync_claude.bat`
-     (for Claude Code) or `run_gmail_sync_codex.bat` (for Codex CLI),
-     running on whatever interval the user wants (every 6-8 hours is
-     reasonable). You can create this scheduled task for them if asked,
-     using the Windows Task Scheduler CLI (`schtasks`) — just confirm the
-     interval and behavior with the user first, since it runs
-     unattended.
+  2. A scheduled task pointed at the right runner script, running on
+     whatever interval the user wants (every 6-8 hours is reasonable):
+     - **Windows**: Task Scheduler → `run_gmail_sync_claude.bat` (Claude
+       Code) or `run_gmail_sync_codex.bat` (Codex CLI). You can create this
+       with `schtasks` if asked.
+     - **macOS**: `launchd` → `run_gmail_sync_claude.sh` or
+       `run_gmail_sync_codex.sh`, using `com.jobtrace.gmailsync.plist.example`
+       as the template (copy to `~/Library/LaunchAgents/`, fill in the
+       placeholders, `launchctl load`).
+
+     Confirm the interval and behavior with the user first either way, since
+     it runs unattended.
+
+**C. Recurring, headless, no assistant app required — billed to the user's
+own Anthropic API key.** `backend/gmail_api_sync.py` calls the Gmail API and
+Anthropic API directly, so nothing needs to be installed/running at sync
+time beyond Python. This needs real one-time setup on the user's part
+(a Google Cloud OAuth client, an Anthropic API key) — walk them through
+**`GMAIL_SYNC_API.md`** in full if they want this option; don't try to
+improvise the Google Cloud steps from memory. Once set up, it's scheduled
+the same way as option B, just pointed at `run_gmail_sync_api.bat` /
+`run_gmail_sync_api.sh` instead.
+
+If the user hasn't said which they want, ask — don't default to one
+silently, since B and C both run unattended and C has real billing
+implications.
 
 Never claim Gmail sync is "active" unless you've actually walked the user
 through authorizing the connector and, if they wanted scheduling, created
