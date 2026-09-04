@@ -51,6 +51,36 @@ const Tracker = (() => {
     return s.length > 16 ? s.slice(0, 16) : s;
   }
 
+  // Whether an interview's actual moment has already happened. A dated-only
+  // value (e.g. an assessment due date) is "past" once its calendar day is
+  // over; a full date+time value (every interview has one) is past the
+  // instant its clock time is reached -- being scheduled "today" doesn't
+  // keep it upcoming past, say, 10am just because it's still today.
+  function isPastMoment(d, whenStr) {
+    if (hasTime(whenStr)) return d.getTime() <= Date.now();
+    const day = new Date(d); day.setHours(0, 0, 0, 0);
+    return day.getTime() < startOfToday().getTime();
+  }
+
+  // "Up next" ordering: soonest upcoming interview first, then once there
+  // are no more ahead, fall back to the most recently past one first
+  // (whatever its outcome) and work backwards. "Past" here means the
+  // interview's actual moment has passed, not just that it isn't tomorrow
+  // or later -- a 10am interview earlier today is already past by evening.
+  function interviewSortKey(iv) {
+    const d = parseWhen(iv.when);
+    if (!d) return [2, 0];
+    const t = d.getTime();
+    if (!isPastMoment(d, iv.when)) return [0, t];
+    return [1, -t];
+  }
+  function sortedByUpNext(list) {
+    return [...list].sort((a, b) => {
+      const ka = interviewSortKey(a), kb = interviewSortKey(b);
+      return ka[0] - kb[0] || ka[1] - kb[1];
+    });
+  }
+
   const INTERVIEW_ROUNDS = ["Interview 1", "Interview 2", "Final Interview"];
   function nextRoundOf(stage) {
     const i = INTERVIEW_ROUNDS.indexOf(stage);
@@ -59,9 +89,28 @@ const Tracker = (() => {
   }
 
   // ---- status derivation ------------------------------------------------
+  // The interview list is per-*interview*, not per-application: several
+  // rows can belong to the same position (one per round). Each row's status
+  // must describe what happened at that specific round, not the
+  // application's current overall state -- otherwise an early round that
+  // was passed reads as whatever the application eventually became (e.g.
+  // "Advanced → Closed" if a later round was the one that got rejected).
+  // Only the most recent round for a given application can have reached an
+  // offer; every earlier "passed" round just means it moved the applicant
+  // on to the next round.
+  function annotateInterviews(d) {
+    const lastEventIdByApp = new Map();
+    for (const iv of d.interviews) lastEventIdByApp.set(iv.application_id, iv.event_id);
+    for (const iv of d.interviews) {
+      iv.isLastForApp = iv.event_id === lastEventIdByApp.get(iv.application_id);
+    }
+    return d;
+  }
+
   function interviewStatus(iv) {
     if (iv.item_status === "passed") {
-      const label = iv.current_stage === "Offer" ? "Offer" : `Advanced → ${iv.current_stage}`;
+      const reachedOffer = iv.isLastForApp && iv.current_stage === "Offer";
+      const label = reachedOffer ? "Offer" : "Moved to next round";
       return { key: "passed", label, cls: "ts-positive" };
     }
     if (iv.item_status === "failed") return { key: "failed", label: "Not selected", cls: "ts-negative" };
@@ -71,7 +120,9 @@ const Tracker = (() => {
     const today = startOfToday();
     const day = new Date(d); day.setHours(0, 0, 0, 0);
     if (day.getTime() > today.getTime()) return { key: "upcoming", label: "Upcoming", cls: "ts-upcoming", rel: relLabel(new Date(d)) };
-    if (day.getTime() === today.getTime()) return { key: "today", label: "Today", cls: "ts-upcoming" };
+    if (day.getTime() === today.getTime() && !isPastMoment(d, iv.when)) {
+      return { key: "today", label: "Today", cls: "ts-upcoming" };
+    }
     return { key: "awaiting", label: "Awaiting result", cls: "ts-awaiting", rel: relLabel(new Date(d)) };
   }
 
@@ -145,7 +196,7 @@ const Tracker = (() => {
   function renderInterviewList() {
     const host = document.getElementById("int-list");
     host.innerHTML = "";
-    const list = data.interviews;
+    const list = sortedByUpNext(data.interviews);
 
     const live = list.filter((i) => !["passed", "failed"].includes(i.item_status) && !i.application_dead);
     document.getElementById("int-subtitle").textContent =
@@ -166,15 +217,25 @@ const Tracker = (() => {
       });
       whenInput.addEventListener("change", () => onSetInterviewWhen(iv, whenInput.value));
 
+      const deleteBtn = Utils.el(
+        "button",
+        { class: "btn btn-danger btn-sm", title: "Remove this interview entry", onclick: () => onDeleteInterview(iv) },
+        "Delete"
+      );
+
       let resultButtons;
       if (["passed", "failed"].includes(iv.item_status)) {
-        resultButtons = [Utils.el("button", { class: "btn btn-ghost btn-sm", onclick: () => onInterviewResult(iv, "pending") }, "Clear result")];
+        resultButtons = [
+          Utils.el("button", { class: "btn btn-ghost btn-sm", onclick: () => onInterviewResult(iv, "pending") }, "Clear result"),
+          deleteBtn,
+        ];
       } else {
         const next = nextRoundOf(iv.current_stage);
         resultButtons = [
           Utils.el("button", { class: "btn btn-sm btn-outcome-pos", onclick: () => onInterviewResult(iv, "offer") }, "Got offer"),
           next ? Utils.el("button", { class: "btn btn-sm btn-outcome-next", onclick: () => onInterviewResult(iv, "next_round") }, `→ ${next}`) : null,
           Utils.el("button", { class: "btn btn-sm btn-outcome-neg", onclick: () => onInterviewResult(iv, "not_selected") }, "Not selected"),
+          deleteBtn,
         ].filter(Boolean);
       }
 
@@ -288,7 +349,7 @@ const Tracker = (() => {
   // ---- actions --------------------------------------------------------
   async function apply(promise, okMsg) {
     try {
-      data = await promise;
+      data = annotateInterviews(await promise);
       renderAssessments();
       renderInterviews();
       if (okMsg) Utils.toast(okMsg, "success");
@@ -319,6 +380,20 @@ const Tracker = (() => {
       pending: "Result cleared",
     }[result] || "Updated";
     apply(Api.setInterviewResult(iv.event_id, result), msg);
+  }
+  async function onDeleteInterview(iv) {
+    const ok = await Utils.confirmDialog(
+      "Delete this interview?",
+      `This removes the ${iv.company} — ${iv.position} interview entry from the Tracker. This won't change the application's stage or outcome. This cannot be undone.`
+    );
+    if (!ok) return;
+    try {
+      await Api.deleteEvent(iv.event_id);
+      Utils.toast("Interview removed", "success");
+      await refresh();
+    } catch (err) {
+      Utils.toast(err.message, "error");
+    }
   }
 
   // ---- add modal -----------------------------------------------------
@@ -361,13 +436,13 @@ const Tracker = (() => {
     const desc = document.getElementById("tf-desc").value;
     try {
       if (formMode === "interview") {
-        data = await Api.addTrackerInterview({
+        data = annotateInterviews(await Api.addTrackerInterview({
           application_id: Number(appId), scheduled_for: when,
           round: document.getElementById("tf-round").value, description: desc,
-        });
+        }));
         Utils.toast("Interview added", "success");
       } else {
-        data = await Api.addTrackerAssessment({ application_id: Number(appId), scheduled_for: when, description: desc });
+        data = annotateInterviews(await Api.addTrackerAssessment({ application_id: Number(appId), scheduled_for: when, description: desc }));
         Utils.toast("Assessment added", "success");
       }
       closeForm();
@@ -384,7 +459,7 @@ const Tracker = (() => {
   // ---- lifecycle -----------------------------------------------------
   async function refresh() {
     try {
-      data = await Api.getTracker();
+      data = annotateInterviews(await Api.getTracker());
     } catch (err) {
       Utils.toast(err.message, "error");
       return;
