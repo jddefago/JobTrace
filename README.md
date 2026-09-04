@@ -92,6 +92,7 @@ JobTrace/
 ├── run_tests.command           # python3 -m unittest discover tests
 ├── start_hidden.vbs            # Windows: no-window wrapper around start.bat
 ├── requirements.txt      # only for the "scheduled with your keys" sync path
+├── SYSTEM_BRIEF.pdf      # plain-language walkthrough for a non-technical reader
 ├── SETUP.md              # setup guide for a fresh AI assistant session
 ├── GMAIL_SYNC.md         # the sync policy every method follows
 ├── GMAIL_SYNC_TASK_PROMPT.md    # prompt the CLI method / a manual paste uses
@@ -311,8 +312,9 @@ mix freely.
   tracks every processed Gmail message ID, and
   `application_events.gmail_message_id` is a second, database-level guard.
   Running the same sync twice leaves the tracker unchanged.
-- **[JobTrace_System_Brief.pdf](JobTrace_System_Brief.pdf)** is a
-  plain-language walkthrough of how the pieces fit together.
+- **[SYSTEM_BRIEF.pdf](SYSTEM_BRIEF.pdf)** is a plain-language walkthrough
+  of the whole system — what it is, install, what it does, and how the
+  backend works — with workflow diagrams, written for a non-technical reader.
 
 ## Development
 

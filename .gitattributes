@@ -9,8 +9,9 @@
 *.vbs text eol=crlf
 
 # Binary files -- never let autocrlf inspect or rewrite these.
-*.pdf -text
 *.ico -text
 *.db -text
 *.png -text
-*.jpg -text
+
+# The System Brief PDF is a binary — keep autocrlf away from it.
+*.pdf -text
