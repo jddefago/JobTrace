@@ -135,6 +135,21 @@ def _run_cli(cfg, log):
     return {"ok": True, "log_path": log_path}
 
 
+def _run_manual_fallback(cfg, log):
+    """method == "manual" (no automation chosen in Settings yet, the default).
+    A manual trigger -- the Update button, or "Sync now" -- should still do
+    something rather than just refuse: prefer an AI-assistant CLI if one is
+    on PATH (that's what "manual" is describing -- ask your assistant), else
+    fall back to the keys path, which will pick up a saved Anthropic API key
+    (or ANTHROPIC_API_KEY) plus Gmail credentials if those are configured."""
+    for name in ("claude", "codex"):
+        if sync_doctor._find_cli(name):
+            log(f"no sync method configured in Settings — found the {name} CLI, using it")
+            return _run_cli({**cfg, "cli": {"command": name}}, log)
+    log("no sync method configured and no AI assistant CLI on PATH — trying a saved API key")
+    return _run_keys(cfg, log)
+
+
 def _run_keys(cfg, log):
     from . import agent as sync_agent
     keys = dict(cfg.get("keys", {}))
@@ -232,8 +247,7 @@ class SyncScheduler:
             elif cfg["method"] == "keys":
                 outcome = _run_keys(cfg, log)
             else:
-                outcome = {"ok": False, "error": "Automatic sync isn't set up. Choose a method in Sync settings, "
-                                                  "or ask your AI assistant to sync."}
+                outcome = _run_manual_fallback(cfg, log)
         except Exception as e:
             outcome = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         finally:
