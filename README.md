@@ -122,7 +122,7 @@ To recreate either by hand, just re-run `setup.*`.
 
 - **Windows or macOS** (Linux is untested but should work — see
   [Starting the app](#starting-the-app))
-- **Python 3.10+** (uses only the standard library — `http.server`,
+- **Python 3.9+** (uses only the standard library — `http.server`,
   `sqlite3`, `csv`, `json`; nothing to `pip install` to run the app or the
   manual/assistant-driven Gmail sync — only the optional headless API sync
   path needs real dependencies, see
@@ -252,9 +252,9 @@ additively migrated, and written to; the app never deletes or overwrites it.
 
 **Off by default.** JobTrace makes no network calls on its own; a sync is a
 separate thing you turn on. Everything below is configured in the dashboard:
-the **Gmail pill (top-right) → Settings**, which shows a live readiness
-checklist. Once a method is set up, click **Update** in the top bar to sync
-on demand and refresh the dashboard. Full reference:
+the **gear icon next to the Gmail pill (top-right) → Settings**, which shows
+a live readiness checklist. Once a method is set up, click **Update** in the
+top bar to sync on demand and refresh the dashboard. Full reference:
 **[GMAIL_SYNC_SETUP.md](GMAIL_SYNC_SETUP.md)**.
 
 | | **Ask your assistant** | **Scheduled via CLI** | **Scheduled with your keys** |
