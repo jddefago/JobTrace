@@ -93,6 +93,7 @@ JobTrace/
 ├── start_hidden.vbs            # Windows: no-window wrapper around start.bat
 ├── requirements.txt      # only for the "scheduled with your keys" sync path
 ├── SYSTEM_BRIEF.pdf      # plain-language walkthrough for a non-technical reader
+├── SYSTEM_BRIEF.source.html  # source for the brief — see its header comment to regenerate
 ├── SETUP.md              # setup guide for a fresh AI assistant session
 ├── GMAIL_SYNC.md         # the sync policy every method follows
 ├── GMAIL_SYNC_TASK_PROMPT.md    # prompt the CLI method / a manual paste uses
@@ -190,7 +191,7 @@ to inspect it directly.
 
 ## Backing up the database
 
-Click **Export ▾ → Back up database** in the top bar. This makes a safe,
+Click the **export icon → Back up database** in the top bar. This makes a safe,
 consistent copy (using SQLite's own backup API, so it's safe even while the
 app is running) into the `backups/` folder, named like
 `applications_backup_20260824_221200.db`.
@@ -206,7 +207,7 @@ app is running) into the `backups/` folder, named like
 
 ## CSV import format
 
-Use **Export ▾ → Import from CSV**. Expected header row and columns:
+Use the **export icon → Import from CSV**. Expected header row and columns:
 
 ```
 company,position,location,application_date,source,job_url,job_description,stage,outcome,notes
@@ -232,54 +233,29 @@ timeline event, exactly like adding one by hand.
 
 ## How the metrics are calculated
 
-These definitions are fixed in `backend/repository.py::get_summary_stats`,
-so the dashboard and analytics view can never disagree with each other:
-
-| Metric | Definition |
-|---|---|
-| Waiting / Pending | Total − Heard Back |
-| Heard Back | `outcome != Pending` OR the stage has moved past Applied (a screening call, coffee chat, or interview invite counts even if you haven't updated outcome yet) |
-| Positive Responses | `outcome IN (Positive, Accepted)`, OR still Pending but the stage has moved past Applied |
-| Negative Responses | `outcome = Negative` |
-| Assessments | ever reached Assessment stage or later |
-| Interviews | ever reached Interview 1 or later |
-| Offers | ever reached Offer stage, or outcome = Accepted |
-| Response Rate | Heard Back ÷ Total |
-| Positive Response Rate | Positive Responses ÷ Total |
-| Interview Conversion Rate | Interviews ÷ Total |
-
-"Ever reached" matters because rejecting an application after an interview
-sets its stage to `Closed` — without tracking the *furthest* stage reached
-separately (`max_stage_reached` in the schema), that history would be lost
-the moment something is closed out.
+The dashboard and analytics view read from the same place
+(`backend/repository.py::get_summary_stats`), so they can never disagree.
+The one non-obvious rule: "Assessments," "Interviews," and response rates
+all count the *furthest stage an application ever reached*, not its current
+one — so an application that got rejected after an interview still counts
+as having interviewed. See that function for the exact definitions.
 
 ## Data safety
 
-- All writes go through `backend/repository.py` inside SQLite transactions —
-  any failure rolls back rather than leaving partial data.
-- Foreign keys (`application_events.application_id → applications.id`) are
-  enforced with `PRAGMA foreign_keys = ON`, and events cascade-delete with
-  their parent application.
-- Every request is validated server-side (`backend/validation.py`) — the
-  frontend cannot bypass these rules, and neither will a future automation
-  script that calls the same functions directly.
-- Double-submitting the "Add Application" form (e.g. a double-click) is
-  guarded on both ends: the submit button disables itself immediately, and
-  the backend deduplicates by a per-form request ID, so retried/duplicated
-  requests return the original record instead of creating a copy.
-- The database file is never deleted or overwritten by the app itself — it's
-  only ever opened, migrated (schema is additive and idempotent), and
-  written to via transactions.
-- Malformed requests (bad JSON, invalid dates, unknown stage/outcome values,
-  oversized text) are rejected with a 400 error and a clear message instead
-  of corrupting data.
+Every write goes through `backend/repository.py` inside a SQLite
+transaction and server-side validation (`backend/validation.py`) — a failed
+or malformed request rolls back or is rejected with a clear error rather
+than corrupting data. The database file itself is only ever opened,
+additively migrated, and written to; the app never deletes or overwrites it.
 
 ## Gmail synchronization
 
 **Off by default.** JobTrace makes no network calls on its own; a sync is a
 separate thing you turn on. Everything below is configured in the dashboard:
 the **Gmail pill (top-right) → Settings**, which shows a live readiness
-checklist. Full reference: **[GMAIL_SYNC_SETUP.md](GMAIL_SYNC_SETUP.md)**.
+checklist. Once a method is set up, click **Update** in the top bar to sync
+on demand and refresh the dashboard. Full reference:
+**[GMAIL_SYNC_SETUP.md](GMAIL_SYNC_SETUP.md)**.
 
 | | **Ask your assistant** | **Scheduled via CLI** | **Scheduled with your keys** |
 |---|---|---|---|
@@ -318,15 +294,7 @@ mix freely.
 
 ## Development
 
-```
-backend/          core: server.py (routing) -> repository.py (business logic)
-                  -> validation.py -> database.py (schema + connection)
-backend/sync/      Gmail sync: state, config, doctor, scheduler, agent, imap
-frontend/js/       one module per view; no build step, no framework
-tests/             stdlib unittest, no dependencies
-```
-
-Run the suite (nothing to install):
+Run the test suite (nothing to install):
 
 ```bash
 python3 -m unittest discover tests        # or: ./run_tests.command
@@ -334,36 +302,6 @@ python3 -m unittest discover tests        # or: ./run_tests.command
 
 Schema changes are additive only — add a column with `_add_column()` in
 `backend/database.py::_migrate_schema`; it backs the database up first and is
-safe to run repeatedly.
-
-## Extending it
-
-Everything goes through `backend/repository.py` — a standalone script (or
-another sync transport) imports it directly, no HTTP server needed, and
-gets the same validation, transactions, and auto-generated timeline events:
-
-```python
-from backend import repository as repo
-
-application = repo.find_matching_application(company="KLM", position="Management Trainee")
-
-repo.add_event(
-    application_id=application["id"],
-    event_type="Assessment Invitation",
-    event_date="2026-08-24",
-)
-
-repo.update_application_stage(
-    application_id=application["id"],
-    stage="Assessment",
-    outcome="Positive",
-)
-```
-
-`backend.database.new_connection()` opens an independent connection to the
-same `data/applications.db` for scripts that live outside the server's
-request-per-thread lifecycle. The schema is additive: `_migrate_schema()` in
-`backend/database.py` adds columns idempotently on startup (that's how the
-Tracker's `scheduled_for` / `item_status` and the Gmail `gmail_message_id`
-columns arrived), and new tables that reference `applications.id` follow the
-same `ON DELETE CASCADE` pattern as `application_events`.
+safe to run repeatedly. Everything else — routing, business logic,
+validation — goes through `backend/repository.py`, so that's the one file
+worth reading to understand or extend how the app behaves.
