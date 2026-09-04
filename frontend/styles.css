@@ -132,9 +132,9 @@ a { color: var(--brass); }
    Topbar
    ============================================================ */
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: 0 24px;
   height: 72px;
   background: rgba(18, 21, 29, 0.88);
@@ -145,7 +145,7 @@ a { color: var(--brass); }
   z-index: 40;
 }
 
-.topbar-left { display: flex; align-items: center; gap: 32px; }
+.topbar-left { display: flex; align-items: center; gap: 32px; justify-self: start; min-width: 0; }
 
 .brand { display: flex; align-items: center; gap: 13px; }
 
@@ -158,14 +158,15 @@ a { color: var(--brass); }
 
 .brand-name { font-weight: 700; font-size: 21px; letter-spacing: -0.015em; color: var(--text-hi); }
 
-.tabs { display: flex; gap: 4px; }
+.tabs { display: flex; gap: 4px; justify-self: center; }
 
 .tab {
   border: none;
   background: transparent;
-  padding: 8px 14px;
+  padding: 9px 16px;
   border-radius: var(--radius-sm);
   color: var(--text-mid);
+  font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
@@ -173,37 +174,70 @@ a { color: var(--brass); }
 .tab:hover { background: var(--line-soft); color: var(--text-hi); }
 .tab.active { background: var(--brass-soft); color: var(--brass); }
 
-.topbar-right { display: flex; align-items: center; gap: 10px; }
+.topbar-right { display: flex; align-items: center; gap: 8px; justify-self: end; }
 
-/* Gmail sync status pill (read-only indicator, opens a detail modal) */
+/* Update dashboard: runs the configured sync, then reloads the views. Brass-
+   bordered so it reads as the "do something now" action against the neutral
+   icon buttons beside it, without competing with the solid-brass Add button. */
+.btn-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--brass-line);
+  background: var(--brass-soft);
+  color: var(--brass);
+  border-radius: var(--radius-sm);
+  padding: 0 16px;
+  height: 36px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-update:hover:not(:disabled) { background: var(--brass); border-color: var(--brass); color: #1a1305; }
+.btn-update:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-update svg { width: 17px; height: 17px; display: block; }
+.btn-update.is-running svg { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Gmail sync status: a compact icon tab (opens a detail modal); a dot
+   marks unresolved/stale state, full status lives in the tooltip. */
 .gmail-controls { display: flex; align-items: center; gap: 4px; }
 .gmail-settings-btn { flex-shrink: 0; }
-.gmail-settings-btn svg { width: 15px; height: 15px; }
 
 .gmail-status-pill {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   border: 1px solid var(--line);
   background: var(--panel-sunken);
   color: var(--text-mid);
-  border-radius: 999px;
-  padding: 6px 14px 6px 10px;
-  font-size: 12.5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  max-width: 340px;
 }
 .gmail-status-pill:hover { background: var(--panel-raised); color: var(--text-hi); border-color: #333a4d; }
-.gmail-status-pill span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gmail-status-icon { display: flex; flex-shrink: 0; color: var(--text-low); }
-.gmail-status-icon svg { width: 14px; height: 14px; }
+.gmail-status-icon svg { width: 18px; height: 18px; }
+.gmail-status-pill::after {
+  content: "";
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
 .gmail-status-pill.has-unresolved { border-color: var(--brass-line); }
 .gmail-status-pill.has-unresolved .gmail-status-icon { color: var(--brass); }
+.gmail-status-pill.has-unresolved::after { background: var(--brass); }
 /* Aged sync: no successful run in a while -- the scheduled job may have stopped. */
 .gmail-status-pill.is-stale { border-color: var(--brass-line); color: var(--text-hi); }
 .gmail-status-pill.is-stale .gmail-status-icon { color: var(--brass); }
+.gmail-status-pill.is-stale::after { background: var(--brass); }
 .gmail-status-pill.is-very-stale { border-color: var(--negative); color: var(--text-hi); }
 .gmail-status-pill.is-very-stale .gmail-status-icon { color: var(--negative); }
+.gmail-status-pill.is-very-stale::after { background: var(--negative); }
 
 /* ============================================================
    Buttons
@@ -241,6 +275,30 @@ a { color: var(--brass); }
 }
 .icon-btn:hover { background: var(--panel-raised); color: var(--text-hi); }
 
+/* Header icon-only actions: settings, export, add application — declared
+   after .icon-btn so their border/size reliably win on elements that carry
+   both classes. */
+.action-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-sunken);
+  color: var(--text-mid);
+}
+.action-icon-btn:hover { background: var(--panel-raised); color: var(--text-hi); border-color: #333a4d; }
+.action-icon-btn svg { width: 18px; height: 18px; display: block; }
+
+.action-icon-primary {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: #1a1305;
+}
+.action-icon-primary:hover { background: var(--brass-hover); border-color: var(--brass-hover); color: #1a1305; }
+
 /* ============================================================
    Dropdown
    ============================================================ */
@@ -277,7 +335,7 @@ a { color: var(--brass); }
 /* ============================================================
    Main layout
    ============================================================ */
-.app-main { max-width: 1360px; margin: 0 auto; padding: 24px; }
+.app-main { max-width: 1360px; margin: 0 auto; padding: 24px; zoom: 1.08; }
 
 .view { display: none; }
 .view.active { display: block; }
@@ -965,8 +1023,8 @@ a { color: var(--brass); }
    ============================================================ */
 .toast-container {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  bottom: 20px;
+  left: 20px;
   z-index: 500;
   display: flex;
   flex-direction: column;
@@ -986,7 +1044,7 @@ a { color: var(--brass); }
 .toast.toast-error { border-color: var(--negative-border); color: var(--negative); }
 .toast.toast-success { border-color: var(--positive-border); color: var(--positive); }
 
-@keyframes slideIn { from { transform: translateX(16px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes slideIn { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 /* ============================================================
    Misc
@@ -1079,9 +1137,11 @@ a { color: var(--brass); }
 }
 
 @media (max-width: 720px) {
-  .topbar { flex-wrap: wrap; height: auto; padding: 10px 16px; gap: 10px; }
+  .topbar { grid-template-columns: 1fr; height: auto; padding: 10px 16px; gap: 10px; }
+  .topbar-left, .tabs, .topbar-right { justify-self: stretch; }
   .topbar-left { flex-wrap: wrap; gap: 12px; }
-  .gmail-status-pill { max-width: 160px; }
+  .tabs { justify-content: center; }
+  .topbar-right { justify-content: center; flex-wrap: wrap; }
   .modal-box-lg { width: 92vw; }
   .app-main { padding: 14px; }
   .summary-grid { grid-template-columns: 1fr 1fr; }

@@ -17,22 +17,29 @@
       <img class="brand-mark" src="/assets/logo.png" alt="" />
       <span class="brand-name">JobTrace</span>
     </div>
-    <nav class="tabs" id="main-tabs">
-      <button class="tab active" data-view="dashboard">Dashboard</button>
-      <button class="tab" data-view="tracker">Tracker</button>
-      <button class="tab" data-view="analytics">Analytics</button>
-    </nav>
   </div>
+
+  <nav class="tabs" id="main-tabs">
+    <button class="tab active" data-view="dashboard">Dashboard</button>
+    <button class="tab" data-view="tracker">Tracker</button>
+    <button class="tab" data-view="analytics">Analytics</button>
+  </nav>
+
   <div class="topbar-right">
+    <button class="btn-update" id="update-dashboard-btn" type="button" title="Sync Gmail and refresh the dashboard">
+      <span class="icon-glyph" id="update-dashboard-icon"></span>
+      <span>Update</span>
+    </button>
+
     <div class="gmail-controls">
-      <button class="gmail-status-pill" id="gmail-status-btn" type="button">
+      <button class="gmail-status-pill" id="gmail-status-btn" type="button" title="Gmail not synced yet">
         <span class="gmail-status-icon" id="gmail-status-icon"></span>
-        <span id="gmail-status-text">Gmail not synced yet</span>
       </button>
-      <button class="icon-btn gmail-settings-btn" id="gmail-settings-btn" type="button" title="Gmail sync settings" aria-label="Gmail sync settings"></button>
+      <button class="icon-btn action-icon-btn gmail-settings-btn" id="gmail-settings-btn" type="button" title="Gmail sync settings" aria-label="Gmail sync settings"></button>
     </div>
+
     <div class="dropdown" id="export-dropdown">
-      <button class="btn btn-ghost" id="export-btn">Export ▾</button>
+      <button class="icon-btn action-icon-btn" id="export-btn" type="button" title="Export applications" aria-label="Export applications"></button>
       <div class="dropdown-menu" id="export-menu">
         <a href="/api/export/csv" class="dropdown-item" id="export-csv">Export as CSV</a>
         <a href="/api/export/json" class="dropdown-item" id="export-json">Export as JSON</a>
@@ -43,7 +50,8 @@
         </label>
       </div>
     </div>
-    <button class="btn btn-primary" id="add-application-btn">+ Add Application</button>
+
+    <button class="icon-btn action-icon-btn action-icon-primary" id="add-application-btn" type="button" title="Add application" aria-label="Add application"></button>
   </div>
 </header>
 

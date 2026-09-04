@@ -47,6 +47,7 @@ const ImportExport = (() => {
   }
 
   function bindEvents() {
+    document.getElementById("export-btn").innerHTML = Icons.download;
     document.getElementById("export-btn").addEventListener("click", () => toggleMenu());
     document.addEventListener("click", (e) => {
       if (!document.getElementById("export-dropdown").contains(e.target)) toggleMenu(false);

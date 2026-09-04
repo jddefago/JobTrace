@@ -129,6 +129,7 @@ const AppForm = (() => {
   function init() {
     populateSelects();
     document.getElementById("f-source").addEventListener("change", onSourceChange);
+    document.getElementById("add-application-btn").innerHTML = Icons.plus;
     document.getElementById("add-application-btn").addEventListener("click", openCreate);
     document.getElementById("app-form-close").addEventListener("click", close);
     document.getElementById("app-form-cancel").addEventListener("click", close);

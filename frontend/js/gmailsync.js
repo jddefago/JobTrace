@@ -23,19 +23,16 @@ const GmailSync = (() => {
   const VERY_STALE_MS = 5 * 24 * 3600 * 1000;
 
   function updatePill(status) {
-    const textEl = document.getElementById("gmail-status-text");
     const btn = document.getElementById("gmail-status-btn");
     document.getElementById("gmail-status-icon").innerHTML = Icons.mail;
-    btn.classList.remove("is-stale", "is-very-stale");
-    btn.removeAttribute("title");
+    btn.classList.remove("is-stale", "is-very-stale", "has-unresolved");
 
     if (status.running) {
-      textEl.textContent = "Gmail: syncing…";
+      btn.title = "Gmail: syncing…";
       return;
     }
     if (!status.lastSuccessfulSync) {
-      textEl.textContent = status.autoEnabled ? "Gmail: waiting for first sync" : "Gmail not synced yet";
-      btn.classList.remove("has-unresolved");
+      btn.title = status.autoEnabled ? "Gmail: waiting for first sync" : "Gmail not synced yet";
       return;
     }
     const r = status.lastSyncResult || {};
@@ -43,17 +40,18 @@ const GmailSync = (() => {
     if (r.applicationsCreated) parts.push(`${r.applicationsCreated} new`);
     if (r.applicationsUpdated) parts.push(`${r.applicationsUpdated} updated`);
     if (!parts.length) parts.push(`${r.emailsReviewed || 0} reviewed`);
-    textEl.textContent = `Gmail: ${fmt(status.lastSuccessfulSync)} · ${parts.join(" · ")}`;
+    let title = `Gmail: ${fmt(status.lastSuccessfulSync)} · ${parts.join(" · ")}`;
     btn.classList.toggle("has-unresolved", status.unresolvedCount > 0);
 
     const age = Date.now() - Date.parse(status.lastSuccessfulSync);
     if (status.autoEnabled && age >= VERY_STALE_MS) {
       btn.classList.add("is-very-stale");
-      btn.title = "No successful automatic sync in days — open Gmail sync settings to check what's wrong.";
+      title += " — no successful automatic sync in days, check Gmail sync settings.";
     } else if (status.autoEnabled && age >= STALE_MS) {
       btn.classList.add("is-stale");
-      btn.title = "The automatic sync hasn't succeeded in a while.";
+      title += " — the automatic sync hasn't succeeded in a while.";
     }
+    btn.title = title;
   }
 
   // ---- status view --------------------------------------------------
@@ -391,5 +389,5 @@ const GmailSync = (() => {
     setInterval(loadStatus, 60000);
   }
 
-  return { init };
+  return { init, loadStatus };
 })();
