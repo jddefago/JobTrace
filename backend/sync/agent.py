@@ -1,21 +1,23 @@
-"""Headless Gmail -> JobTrace sync using the user's own Anthropic + Google
-API keys. Unlike GMAIL_SYNC.md's workflow, this script does NOT need an AI
-assistant app (Claude Desktop/Code, Codex CLI) installed or running -- it
-calls the Gmail API and the Anthropic API directly, so it can be scheduled
-(Task Scheduler / launchd / cron) on a machine with nothing but Python and
-this project's dependencies installed.
+"""Headless Gmail -> JobTrace sync using the user's own Anthropic API key
+plus their own Gmail access. Unlike GMAIL_SYNC.md's workflow, this does NOT
+need an AI assistant app (Claude Desktop/Code, Codex CLI) installed -- it
+calls Gmail and the Anthropic API directly, so the scheduler (or a cron
+job) can run it with nothing but Python installed.
 
-See GMAIL_SYNC_API.md for one-time setup (a Google Cloud OAuth client, an
-Anthropic API key). See GMAIL_SYNC.md for the actual sync *policy* -- this
-script reads that file from disk at runtime and uses it as the bulk of the
-system prompt below, so the classification rules, matching tiers, and
-duplicate-protection rules have exactly one source of truth shared with the
-assistant-driven sync path. Never fork a second copy of that policy here.
+Two ways to reach Gmail, chosen by config `gmail_transport`:
+  "imap" (default) -- a Gmail *app password* over IMAP. Two-minute setup,
+                       no Google Cloud console. See backend/sync/imap.py.
+  "api"            -- a Google Cloud OAuth client. More setup; see SETUP.md.
+
+See GMAIL_SYNC.md for the actual sync *policy* -- this script reads that
+file at runtime and uses it as the system prompt, so classification rules,
+matching tiers and duplicate protection have one source of truth shared
+with the assistant-driven path. Never fork a second copy of that policy.
 
 This module only ever calls into backend/repository.py and
-backend/gmail_sync.py -- the same functions the manual, assistant-driven
-sync uses -- so every safety guarantee documented there (transactions,
-validation, WAL mode, idempotent creates) applies unchanged.
+backend/sync/state.py -- the same functions the manual sync uses -- so every
+safety guarantee there (transactions, validation, WAL mode, idempotent
+creates) applies unchanged.
 """
 
 import argparse
@@ -28,23 +30,28 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Runnable as a script (python3 backend/sync/agent.py) -- put the project
+# root on sys.path so `backend` imports resolve.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from backend import repository as repo
-from backend import gmail_sync
+from backend import database, repository as repo
+from backend.sync import config as sync_config, state as sync_state
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+
+class SyncConfigError(Exception):
+    """Configuration is incomplete (missing key/credentials). Callers turn
+    this into a clear message rather than a stack trace."""
+
+
+BASE_DIR = database.BASE_DIR
+DATA_DIR = database.DATA_DIR
 GMAIL_SYNC_DOC_PATH = os.path.join(BASE_DIR, "GMAIL_SYNC.md")
 
-# Each secret-bearing file's location can be overridden with an environment
-# variable. This matters when the project folder sits inside a cloud-synced
-# tree (OneDrive/Dropbox/Google Drive/iCloud): the API key, OAuth client
-# secret, and live Gmail token should not be uploaded to a sync provider
-# along with the rest of the folder. Point these somewhere outside the
-# synced tree (e.g. ~/.jobtrace/) and the defaults below are ignored.
-CONFIG_PATH = os.environ.get(
-    "JOBTRACE_GMAIL_CONFIG", os.path.join(DATA_DIR, "gmail_api_config.json"))
+# The OAuth client secret and live Gmail token can be moved out of the
+# project folder via these env vars -- handy when the folder sits inside a
+# cloud-synced tree (OneDrive/Dropbox/Google Drive/iCloud) and you don't want
+# them uploaded. The Anthropic key and IMAP password live in sync_config.json
+# (chmod 600); ANTHROPIC_API_KEY in the environment overrides it.
 GMAIL_CREDENTIALS_PATH = os.environ.get(
     "JOBTRACE_GMAIL_CREDENTIALS", os.path.join(DATA_DIR, "gmail_api_credentials.json"))
 GMAIL_TOKEN_PATH = os.environ.get(
@@ -53,9 +60,9 @@ SYNC_LOG_DIR = os.path.join(DATA_DIR, "sync_logs")
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-# Check https://docs.claude.com/en/docs/about-claude/models for the current
-# model catalog if this default ever starts erroring as unknown -- model IDs
-# change over time. Override via the "model" key in data/gmail_api_config.json.
+# Check https://docs.claude.com/en/docs/about-claude/models if this default
+# ever starts erroring as unknown -- model IDs change over time. Override via
+# the "model" field in the dashboard's Sync settings.
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TURNS = 60
 MAX_BODY_CHARS = 20000
@@ -77,27 +84,26 @@ WRITE_TOOLS = {
 # ---------------------------------------------------------------------------
 
 def load_config():
-    config = {}
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            config = json.load(f)
-
-    config.setdefault("anthropic_api_key", os.environ.get("ANTHROPIC_API_KEY"))
-    config.setdefault("model", DEFAULT_MODEL)
-    config.setdefault("gmail_label", "Job Applications")
-    config.setdefault("lookback_days", 30)
-    # Off by default: email content is untrusted input reaching a model that,
-    # with this on, also has a live internet-search tool. A crafted email
-    # could try to prompt-inject a search query that leaks fragments of your
-    # local data. Turn on deliberately if you want the location/job-URL/
-    # source enrichment step badly enough to accept that.
-    config.setdefault("enable_web_search", False)
+    """The keys-section of data/sync_config.json (written by the dashboard),
+    with ANTHROPIC_API_KEY from the environment as a fallback for the key."""
+    config = dict(sync_config.load().get("keys", {}))
 
     if not config.get("anthropic_api_key"):
-        raise SystemExit(
-            "No Anthropic API key found. Put it in data/gmail_api_config.json "
-            '("anthropic_api_key") or set the ANTHROPIC_API_KEY environment '
-            "variable. See GMAIL_SYNC_API.md."
+        config["anthropic_api_key"] = os.environ.get("ANTHROPIC_API_KEY")
+    if not config.get("model"):
+        config["model"] = DEFAULT_MODEL
+
+    if not config.get("anthropic_api_key"):
+        raise SyncConfigError(
+            "No Anthropic API key. Add it in the dashboard's Sync settings, or "
+            "set the ANTHROPIC_API_KEY environment variable."
+        )
+    if config["gmail_transport"] == "imap" and not (
+        config.get("gmail_address") and config.get("gmail_app_password")
+    ):
+        raise SyncConfigError(
+            "IMAP sync needs your Gmail address and a Gmail app password — add "
+            "them in the dashboard's Sync settings."
         )
     return config
 
@@ -124,7 +130,7 @@ def get_gmail_service():
                 raise SystemExit(
                     f"Missing {GMAIL_CREDENTIALS_PATH}. Download your OAuth "
                     "client secret (Desktop app type) from Google Cloud "
-                    "Console -- see GMAIL_SYNC_API.md."
+                    "Console -- see GMAIL_SYNC_SETUP.md."
                 )
             # Opens a browser once for consent. Only needed interactively,
             # the first time (or after revoking access) -- every run after
@@ -189,8 +195,46 @@ def gmail_get_message(service, message_id):
 
 
 # ---------------------------------------------------------------------------
+# Fetchers: two ways to reach Gmail behind one small interface
+#   list_labels()  search(query, include_trash, max_results)  get_message(id)
+# ---------------------------------------------------------------------------
+
+class ApiFetcher:
+    """Gmail via a Google Cloud OAuth client (googleapiclient)."""
+
+    def __init__(self):
+        self._service = get_gmail_service()
+
+    def list_labels(self):
+        return gmail_list_labels(self._service)
+
+    def search(self, query, include_trash=True, max_results=300):
+        return gmail_search_messages(self._service, query, include_trash, max_results)
+
+    def get_message(self, message_id):
+        return gmail_get_message(self._service, message_id)
+
+    def account_email(self):
+        try:
+            return self._service.users().getProfile(userId="me").execute().get("emailAddress")
+        except Exception:
+            return None
+
+    def close(self):
+        pass
+
+
+def make_fetcher(config):
+    transport = config.get("gmail_transport", "imap")
+    if transport == "imap":
+        from backend.sync.imap import ImapFetcher
+        return ImapFetcher(config.get("gmail_address"), config.get("gmail_app_password"))
+    return ApiFetcher()
+
+
+# ---------------------------------------------------------------------------
 # Tool schemas (Anthropic tool-use) -- one per operation GMAIL_SYNC.md
-# describes, either against Gmail or against repository.py/gmail_sync.py.
+# describes, either against Gmail or against repository.py/sync_state.py.
 # ---------------------------------------------------------------------------
 
 TOOLS = [
@@ -419,29 +463,29 @@ class ToolError(Exception):
 
 class SyncSession:
     """Holds the mutable local state a sync run reads/writes, and dispatches
-    each Anthropic tool call to the real Gmail/repository/gmail_sync call it
+    each Anthropic tool call to the real Gmail/repository/sync_state call it
     represents. Every write tool re-checks duplicate protection itself,
     independent of whatever the model believes -- see GMAIL_SYNC.md's
     "duplicate protection (critical)" section, which this mirrors exactly."""
 
-    def __init__(self, service, dry_run=False):
-        self.service = service
+    def __init__(self, fetcher, dry_run=False):
+        self.fetcher = fetcher
         self.dry_run = dry_run
-        self.state = gmail_sync.load_sync_state()
-        self.unresolved = gmail_sync.load_unresolved()
+        self.state = sync_state.load_sync_state()
+        self.unresolved = sync_state.load_unresolved()
         self.done = False
         self.report = None
 
     def _save_state(self):
         if not self.dry_run:
-            gmail_sync.save_sync_state(self.state)
+            sync_state.save_sync_state(self.state)
 
     def _save_unresolved(self):
         if not self.dry_run:
-            gmail_sync.save_unresolved(self.unresolved)
+            sync_state.save_unresolved(self.unresolved)
 
     def _already_processed(self, message_id):
-        return gmail_sync.is_message_processed(self.state, message_id) or repo.has_processed_gmail_message(message_id)
+        return sync_state.is_message_processed(self.state, message_id) or repo.has_processed_gmail_message(message_id)
 
     def dispatch(self, name, args):
         if self.dry_run and name in WRITE_TOOLS and name != "record_sync_result":
@@ -455,14 +499,14 @@ class SyncSession:
     # -- Gmail (read-only) ---------------------------------------------
 
     def _tool_search_gmail(self, args):
-        ids = gmail_search_messages(self.service, args["query"], args.get("include_trash", True))
+        ids = self.fetcher.search(args["query"], args.get("include_trash", True))
         return {"message_ids": ids, "count": len(ids)}
 
     def _tool_list_gmail_labels(self, args):
-        return {"labels": gmail_list_labels(self.service)}
+        return {"labels": self.fetcher.list_labels()}
 
     def _tool_get_gmail_message(self, args):
-        return gmail_get_message(self.service, args["message_id"])
+        return self.fetcher.get_message(args["message_id"])
 
     # -- Duplicate protection -------------------------------------------
 
@@ -470,7 +514,7 @@ class SyncSession:
         return {"processed": self._already_processed(args["message_id"])}
 
     def _tool_mark_message_processed(self, args):
-        gmail_sync.mark_message_processed(self.state, args["message_id"])
+        sync_state.mark_message_processed(self.state, args["message_id"])
         self._save_state()
         return {"marked": args["message_id"]}
 
@@ -536,14 +580,14 @@ class SyncSession:
         )
         if event is None:
             raise ToolError(f"No application with id {args['application_id']}")
-        gmail_sync.mark_message_processed(self.state, message_id)
+        sync_state.mark_message_processed(self.state, message_id)
         self._save_state()
         return event
 
     # -- Unresolved queue ---------------------------------------------------
 
     def _tool_add_unresolved_item(self, args):
-        row = gmail_sync.add_unresolved_item(self.unresolved, {
+        row = sync_state.add_unresolved_item(self.unresolved, {
             "gmailMessageId": args["gmail_message_id"],
             "emailDate": args.get("email_date"),
             "sender": args.get("sender"),
@@ -558,7 +602,7 @@ class SyncSession:
         return row
 
     def _tool_remove_unresolved_item(self, args):
-        removed = gmail_sync.remove_unresolved_item(self.unresolved, args["item_id"])
+        removed = sync_state.remove_unresolved_item(self.unresolved, args["item_id"])
         self._save_unresolved()
         return {"removed": removed}
 
@@ -578,7 +622,7 @@ class SyncSession:
             "unresolvedCount": len(self.unresolved),
         }
         if not self.dry_run:
-            gmail_sync.record_sync_result(self.state, result)
+            sync_state.record_sync_result(self.state, result)
             self._save_state()
         self.done = True
         self.report = {"result": result, "summary": args.get("summary", "")}
@@ -597,9 +641,9 @@ which maps onto the workflow document below like this:
   search_threads (MCP)              -> search_gmail
   get_thread / get_message (MCP)    -> get_gmail_message
   list_labels (MCP)                 -> list_gmail_labels
-  gmail_sync.is_message_processed + repository.has_processed_gmail_message
+  sync_state.is_message_processed + repository.has_processed_gmail_message
                                      -> is_message_processed (checks both)
-  gmail_sync.mark_message_processed -> mark_message_processed (for messages
+  sync_state.mark_message_processed -> mark_message_processed (for messages
                                         you don't add an event for, e.g.
                                         IRRELEVANT) -- add_event marks
                                         processed for you automatically
@@ -610,9 +654,9 @@ which maps onto the workflow document below like this:
   repo.update_application_stage     -> update_application_stage
   repo.update_application           -> update_application
   repo.add_event                    -> add_event
-  gmail_sync.add_unresolved_item    -> add_unresolved_item
-  gmail_sync.remove_unresolved_item -> remove_unresolved_item
-  gmail_sync.record_sync_result     -> record_sync_result (call this exactly
+  sync_state.add_unresolved_item    -> add_unresolved_item
+  sync_state.remove_unresolved_item -> remove_unresolved_item
+  sync_state.record_sync_result     -> record_sync_result (call this exactly
                                         once, at the very end -- the run ends
                                         as soon as you call it)
 
@@ -642,11 +686,31 @@ def build_system_prompt():
 # ---------------------------------------------------------------------------
 
 def run_sync(config, dry_run=False, log=print):
+    fetcher = make_fetcher(config)
+    try:
+        return _run_sync_with_fetcher(config, fetcher, dry_run, log)
+    finally:
+        try:
+            fetcher.close()
+        except Exception:
+            pass
+
+
+def _run_sync_with_fetcher(config, fetcher, dry_run, log):
     import anthropic
 
-    service = get_gmail_service()
-    session = SyncSession(service, dry_run=dry_run)
+    session = SyncSession(fetcher, dry_run=dry_run)
     client = anthropic.Anthropic(api_key=config["anthropic_api_key"])
+
+    # Record which mailbox this run reads, so the dashboard can show it.
+    try:
+        addr = fetcher.account_email()
+        if addr:
+            log(f"connected mailbox: {addr}")
+            sync_state.set_connected_account(session.state, addr)
+            session._save_state()
+    except Exception:
+        pass
 
     tools = list(TOOLS)
     if config.get("enable_web_search", True):
@@ -720,6 +784,52 @@ def run_sync(config, dry_run=False, log=print):
 
 
 # ---------------------------------------------------------------------------
+# Library entry point (used by backend/sync/scheduler.py)
+# ---------------------------------------------------------------------------
+
+def run_job(config=None, dry_run=False, log=None):
+    """Run one sync, capturing a log file. Never raises for expected
+    problems — returns {ok, error, report, log_path, lines}."""
+    os.makedirs(SYNC_LOG_DIR, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(SYNC_LOG_DIR, f"sync_keys_{ts}.log")
+    lines = []
+
+    def _log(msg):
+        lines.append(str(msg))
+        if log:
+            log(msg)
+
+    _log(f"===== keys-based Gmail sync started {datetime.datetime.now().isoformat(timespec='seconds')} =====")
+    result = {"ok": False, "error": None, "report": None, "log_path": log_path, "lines": lines}
+    try:
+        cfg = config or load_config()
+        _log(f"transport={cfg.get('gmail_transport')} model={cfg.get('model')}")
+        session = run_sync(cfg, dry_run=dry_run, log=_log)
+        result["report"] = session.report
+        if session.report:
+            result["ok"] = True
+            _log("Gmail Sync Complete")
+            _log(json.dumps(session.report.get("result", {}), indent=2))
+        else:
+            result["error"] = "The sync ended without recording a result."
+    except SyncConfigError as e:
+        result["error"] = str(e)
+        _log(f"Not configured: {e}")
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+        _log(f"Sync run failed: {result['error']}")
+    finally:
+        _log(f"===== finished {datetime.datetime.now().isoformat(timespec='seconds')} =====")
+        try:
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except OSError:
+            pass
+    return result
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -730,7 +840,10 @@ def main():
     parser.add_argument("--label", type=str, help="Override the config's gmail_label.")
     args = parser.parse_args()
 
-    config = load_config()
+    try:
+        config = load_config()
+    except SyncConfigError as e:
+        raise SystemExit(str(e))
     if args.lookback_days:
         config["lookback_days"] = args.lookback_days
     if args.label:
@@ -738,7 +851,7 @@ def main():
 
     os.makedirs(SYNC_LOG_DIR, exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join(SYNC_LOG_DIR, f"gmail_sync_api_{timestamp}.log")
+    log_path = os.path.join(SYNC_LOG_DIR, f"sync_api_{timestamp}.log")
 
     lines = []
 

@@ -4,6 +4,15 @@
 set -u
 cd "$(dirname "$0")"
 
+# If this project was downloaded as a zip / AirDrop / cloud-synced, macOS
+# tags the files with com.apple.quarantine and Gatekeeper nags on every
+# launch. Once this script is running the first block is already past, so
+# clear the flag from the launcher scripts for next time. Best-effort only.
+if command -v xattr >/dev/null 2>&1; then
+    xattr -d com.apple.quarantine start.command stop.command setup.command \
+        >/dev/null 2>&1 || true
+fi
+
 # Identify THIS install's own server.py by its absolute path, not just
 # "backend/server.py" -- that fragment is identical across every copy of
 # JobTrace on the machine, so a relative-path match could mistake a
@@ -26,7 +35,7 @@ fi
 if [ -z "$PYEXE" ]; then
     echo ""
     echo "Python was not found on your PATH."
-    echo "Please install Python 3.10 or later from https://www.python.org/downloads/"
+    echo "Please install Python 3.9 or later from https://www.python.org/downloads/"
     echo ""
     read -r -p "Press Enter to close..." _
     exit 1

@@ -1,143 +1,157 @@
 # JobTrace — Setup Guide (for your AI assistant)
 
-This document is written so that a **fresh AI coding assistant session —
-Claude Code, Claude Desktop, Codex CLI, or similar — with no memory of any
-prior conversation, can set JobTrace up correctly** by reading this file
-alone. If a user has just downloaded this project and asked you to "set
-up JobTrace" or "get this running," read this whole file before doing
-anything.
+This file is written so a **fresh AI assistant session — Claude Code, Claude
+Desktop, Codex CLI, or similar, with no memory of any prior conversation —
+can set JobTrace up by reading this file alone.** If a user just downloaded
+this and asked you to "set it up," read this whole file first.
 
-## What you're setting up
+> **Golden rule.** The tracker is the product. Gmail sync is an optional
+> add-on with several moving parts, and some of them you *cannot* finish from
+> a sandboxed session. If a sync step is blocked, say plainly which step and
+> what the user must do, then stop — never leave the app itself broken while
+> chasing sync.
 
-JobTrace is a local, offline job-application tracker: a small Python HTTP
-server + SQLite database, serving a plain HTML/CSS/JS dashboard. It makes
-no network calls of its own — nothing here talks to the internet except
-the optional Gmail-sync workflow described in step 3, which is a separate,
-opt-in feature the user has to explicitly ask for.
+---
 
-This is a fresh, empty copy: there is no existing data yet. `data/` and
-`backups/` are present but empty (aside from a `.gitkeep` placeholder) —
-that's expected, not a bug.
+## 1. Get the app running — required, ~2 minutes
 
-## 1. Check prerequisites
+Pure standard-library Python; nothing to `pip install` for the app.
 
-- Confirm Python 3.10+ is installed and on PATH: run `python --version`
-  (or `python3 --version`). If it's missing, tell the user to install it
-  from https://www.python.org/downloads/ and, on Windows, make sure
-  **"Add python.exe to PATH"** is checked during install.
-- `requirements.txt` has nothing to install for the app itself, or for the
-  manual/assistant-driven Gmail sync — the backend uses only the Python
-  standard library. Don't run `pip install` unless you're setting up the
-  headless API Gmail sync (step 3, option C) or hit an actual
-  `ModuleNotFoundError`.
-- The launcher scripts come in two flavors: `start.bat`/`stop.bat`/
-  `start_hidden.vbs` for Windows, `start.command`/`stop.command` for macOS.
-  Both are checked into the repo — check the user's OS (from your own
-  environment context if you have it, otherwise ask) before step 2 so you
-  run the right one.
+1. **Check Python 3:** `python3 --version` (or `python --version`). 3.9+ is
+   fine — macOS's built-in `/usr/bin/python3` works. If it's missing, send
+   the user to <https://www.python.org/downloads/> (on Windows, tick "Add
+   python.exe to PATH") and **stop here** until that's done.
 
-## 2. First run
+2. **Run setup:**
+   - macOS: `./setup.command` (or double-click it in Finder)
+   - Windows: `setup.bat`
+   - Either one is safe to re-run. It clears the macOS quarantine flag,
+     (re)creates the desktop launcher with this folder's path baked in,
+     starts the server, and opens <http://localhost:8766>.
+   - No `setup.*`? Use `./start.command` / `start.bat` directly.
 
-**Windows:**
-1. Run `start.bat` from the project root (or double-click it). This
-   starts the server hidden in the background on `http://localhost:8766`
-   and opens the dashboard in the default browser. (This port deliberately
-   differs from a stock JobTrace install's 8765, so this copy can run at
-   the same time as another one on the same machine without either seeing
-   the other's data.)
-2. Confirm `data/applications.db` gets created automatically — it won't
-   exist yet in a fresh download, and that's expected.
-3. Confirm the dashboard loads with an empty state (no applications yet).
-   That confirms the server and database are working.
-4. A ready-made `JobTrace.lnk` shortcut is already sitting in the project
-   folder — offer to copy/move it onto the user's Desktop for them.
-   **It only works if this project folder stays where it currently is** —
-   its target path is baked in at the folder's current location. If the
-   user has already moved this folder since downloading it (or plans to),
-   regenerate the shortcut instead using the PowerShell snippet in
-   `README.md`'s "Desktop shortcut" section, run from the project's
-   *current* location.
+3. **Confirm:** the dashboard loads at `http://localhost:8766` with an empty
+   state, and `data/applications.db` now exists. That's the whole app
+   working.
 
-**macOS:**
-1. Make sure `start.command`/`stop.command` are executable (they're
-   committed with the exec bit set, so this is usually already true after a
-   `git clone`; if it was downloaded some other way — a zip, AirDrop, a
-   cloud-synced folder — run `chmod +x start.command stop.command` once
-   first).
-2. Run `./start.command` from the project root, or double-click it in
-   Finder (a Terminal window briefly appears, then the dashboard opens at
-   `http://localhost:8766` — the same non-hidden experience plain
-   `start.bat` gives on Windows; there's no fully-hidden launcher for macOS
-   yet).
-3. Confirm `data/applications.db` gets created automatically and the
-   dashboard loads with an empty state, same as the Windows steps above.
-4. To stop the server later: `./stop.command` (or double-click it).
-5. Offer to drag `start.command` onto the Dock or Desktop as a one-click
-   launcher, if the user wants that convenience.
+**macOS quarantine:** a downloaded (non-`git clone`) copy is Gatekeeper-
+flagged. `setup.command` clears it; if double-clicking still refuses,
+right-click → Open → Open once, or run
+`xattr -dr com.apple.quarantine .` in the project folder.
 
-**Linux:** not tested, but `python3 backend/server.py` directly should work
-unmodified (pure-stdlib server) — the `.command` script's logic (minus the
-macOS-specific `open` command, which would need to become `xdg-open`) should
-port over if the user wants the same convenience.
+**Linux:** untested but `python3 backend/server.py` runs unmodified.
 
-## 3. Optional: Gmail sync
+If step 1–3 fail it's almost always Python not installed or not on PATH.
+Fix that and nothing else until the dashboard loads.
 
-**Only do this if the user actually asks for it** — it's opt-in, not
-required for the tracker itself to work.
+---
 
-Explain clearly: JobTrace has no Gmail integration of its own. There are
-**three ways** to sync it, and the user should pick based on whether they
-want it automatic and whether they're OK with their own Anthropic API
-billing:
+## 2. Gmail sync — optional, only if the user asks
 
-**A. One-off, manual, free** — *you* (this assistant session) read the
-user's Gmail through your own connector/MCP tool and write results into
-JobTrace's local files directly — the assistant session is the integration,
-not the app. Read `GMAIL_SYNC.md` in full first (it has a "lessons from the
-first sync" section with mistakes worth not repeating), then follow
-`GMAIL_SYNC_TASK_PROMPT.md`.
+JobTrace has **no Gmail integration of its own.** There are three ways to
+sync it. **Ask the user which they want; default to A** unless they
+specifically want it to run automatically.
 
-**B. Recurring, free, but requires an assistant app installed** — same
-mechanism as A, run on a schedule instead of on demand. This needs two
-things the user sets up themselves, not something you can fully configure
-from inside a sandboxed session:
-  1. A Gmail MCP connector authorized under whichever CLI will run the
-     scheduled task (Claude Code or Codex CLI) — done once, in that
-     tool's own account/connector settings.
-  2. A scheduled task pointed at the right runner script, running on
-     whatever interval the user wants (every 6-8 hours is reasonable):
-     - **Windows**: Task Scheduler → `run_gmail_sync_claude.bat` (Claude
-       Code) or `run_gmail_sync_codex.bat` (Codex CLI). You can create this
-       with `schtasks` if asked.
-     - **macOS**: `launchd` → `run_gmail_sync_claude.sh` or
-       `run_gmail_sync_codex.sh`, using `com.jobtrace.gmailsync.plist.example`
-       as the template (copy to `~/Library/LaunchAgents/`, fill in the
-       placeholders, `launchctl load`).
+All three write the same local files (`data/applications.db`,
+`data/gmail_sync_state.json`, `data/unresolved_gmail_items.json`) following
+the same rules, so they can be mixed.
 
-     Confirm the interval and behavior with the user first either way, since
-     it runs unattended.
+### A. Manual — "sync when I ask" · recommended, zero setup
 
-**C. Recurring, headless, no assistant app required — billed to the user's
-own Anthropic API key.** `backend/gmail_api_sync.py` calls the Gmail API and
-Anthropic API directly, so nothing needs to be installed/running at sync
-time beyond Python. This needs real one-time setup on the user's part
-(a Google Cloud OAuth client, an Anthropic API key) — walk them through
-**`GMAIL_SYNC_API.md`** in full if they want this option; don't try to
-improvise the Google Cloud steps from memory. Once set up, it's scheduled
-the same way as option B, just pointed at `run_gmail_sync_api.bat` /
-`run_gmail_sync_api.sh` instead.
+**You** (this assistant session) are the integration. When the user says
+"sync my Gmail" / "check for job updates":
 
-If the user hasn't said which they want, ask — don't default to one
-silently, since B and C both run unattended and C has real billing
-implications.
+1. Read **[GMAIL_SYNC.md](GMAIL_SYNC.md)** in full, including its "lessons
+   from the first sync" section.
+2. Follow it: search Gmail through your own connector, classify each mail,
+   write results via `backend/repository.py` and `backend/sync/state.py`.
 
-Never claim Gmail sync is "active" unless you've actually walked the user
-through authorizing the connector and, if they wanted scheduling, created
-the scheduled task yourself in this session.
+Needs only that your assistant app has Gmail access (Claude Desktop: connect
+Gmail in its settings). Nothing to install, identical on macOS and Windows,
+nothing runs unless asked. **This is the low-friction path — steer here
+unless the user wants unattended sync.**
 
-## 4. Tell the user what you did
+### B. Automatic via the `claude` / `codex` CLI · free, more moving parts
 
-Report plainly: what you checked, what's now running, the dashboard URL,
-and whether Gmail sync was set up or left for later. Don't assume
-follow-up steps happened silently — say what's actually configured now
-versus what the user would still need to do themselves.
+JobTrace's own scheduler (in the running server) shells out to the CLI on a
+timer. Configure it in the dashboard — **Gmail pill (top-right) → Settings →
+"Scheduled via CLI"** — which shows a live readiness checklist. Or drive it
+over the API:
+
+```
+PUT /api/sync/config   {"method":"cli","cli":{"command":"claude"},
+                        "auto":{"enabled":true,"interval_hours":6}}
+GET /api/sync/doctor    -> tells you exactly what's still missing
+POST /api/sync/run      -> run once now
+```
+
+This is the **highest-friction** option — recommend it only if the user
+already runs a Gmail MCP server in their CLI. Two prerequisites, **neither
+of which you can complete from a sandboxed session**:
+
+1. The CLI **installed and signed in** — `claude` (or `codex`) once in a
+   terminal.
+2. A **Gmail connector on that CLI** — either a Gmail connector enabled in
+   their Claude account (if their plan has connectors; Claude Code can use
+   it), or a community Gmail MCP server added with `claude mcp add`. The
+   latter runs its own Google OAuth — same Cloud-client work as option C's
+   OAuth transport. Separate from connecting Gmail in the desktop app.
+   Verify: `claude mcp list` must show Gmail.
+
+`GET /api/sync/doctor` reports both. If not `ready`, name the red item and
+its fix, then move on.
+
+### C. Automatic with your own keys · no CLI, no assistant app
+
+The scheduler runs the sync in-process. Needs an **Anthropic API key**
+(<https://console.anthropic.com>, billed per run — confirm the user is OK)
+and Gmail access — one of two transports:
+
+- **Google sign-in (OAuth) — recommended.** Token is scoped
+  `gmail.readonly` (cannot send/delete), revocable per-app. Costs a one-time
+  Google Cloud OAuth client (~10 min): enable Gmail API, make a Desktop
+  OAuth client, save the JSON as `data/gmail_api_credentials.json`, run
+  `python3 backend/sync/agent.py --dry-run` once for the browser
+  consent. Needs `pip install google-api-python-client google-auth-oauthlib`.
+- **Gmail app password (IMAP) — quicker, less locked-down.** No Cloud
+  console (myaccount.google.com → Security → App passwords), but the
+  password **can't be scoped read-only** — it grants read *and send* — and
+  sits in `data/sync_config.json` (chmod 600). Fine on a machine the user
+  controls; make sure they know they can revoke it. Only `anthropic` to
+  install.
+
+Set it up in the dashboard (**Settings → "Scheduled with my keys"**) or via
+API:
+
+```
+PUT /api/sync/config  {"method":"keys","keys":{
+    "gmail_transport":"api",        # or "imap"
+    "gmail_address":"…","gmail_app_password":"…",   # imap only
+    "anthropic_api_key":"…"},"auto":{"enabled":true,"interval_hours":6}}
+POST /api/sync/run
+```
+
+Full walkthrough: **[GMAIL_SYNC_SETUP.md](GMAIL_SYNC_SETUP.md)**.
+
+### Automatic sync only runs while the server runs
+
+The scheduler lives in the server process. For unattended coverage the user
+should keep JobTrace running — add the desktop launcher to Login Items
+(macOS: System Settings → General → Login Items) or the Startup folder
+(Windows). Say this; don't assume it.
+
+---
+
+## 3. Tell the user what you did
+
+Plainly:
+
+- App running at `http://localhost:8766` (or why not).
+- Which sync method is configured, and whether `GET /api/sync/doctor` says
+  it's `ready`.
+- What's left for the user to do themselves — CLI sign-in, adding the CLI
+  Gmail connector, generating an app password, `pip install`.
+
+**Never say automatic sync is "on" unless `GET /api/sync/doctor` returns
+`ready: true` and you enabled it.** For the manual path, never say it's
+"active" — it runs only when asked.

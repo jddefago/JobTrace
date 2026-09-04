@@ -17,7 +17,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend import constants, database, gmail_sync, repository, validation
+from backend import constants, database, repository, validation
+from backend.sync import config as sync_config, doctor as sync_doctor, state as sync_state
+from backend.sync.scheduler import scheduler as sync_scheduler, last_run as sync_last_run
 
 FRONTEND_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend"
@@ -122,6 +124,8 @@ def add_event(handler, match, query, body):
         event_date=body.get("event_date"),
         description=body.get("description", ""),
         source="manual",
+        scheduled_for=body.get("scheduled_for"),
+        item_status=body.get("item_status"),
     )
     if event is None:
         return 404, {"error": "Application not found"}
@@ -144,6 +148,70 @@ def delete_event(handler, match, query, body):
     return 200, {"deleted": True}
 
 
+@route("GET", r"/api/tracker")
+def tracker(handler, match, query, body):
+    return 200, repository.get_tracker()
+
+
+@route("PUT", r"/api/events/(?P<id>\d+)/schedule")
+def set_event_schedule(handler, match, query, body):
+    result = repository.set_item_schedule(int(match.group("id")), (body or {}).get("scheduled_for", ""))
+    if result is None:
+        return 404, {"error": "Event not found"}
+    return 200, result
+
+
+@route("POST", r"/api/applications/(?P<id>\d+)/assessment-complete")
+def assessment_complete(handler, match, query, body):
+    completed = (body or {}).get("completed", True)
+    result = repository.complete_assessment(int(match.group("id")), completed=bool(completed))
+    if result is None:
+        return 404, {"error": "Application not found"}
+    return 200, result
+
+
+@route("POST", r"/api/events/(?P<id>\d+)/interview-result")
+def interview_result(handler, match, query, body):
+    result = repository.set_interview_result(int(match.group("id")), (body or {}).get("result"))
+    if result is None:
+        return 404, {"error": "Interview item not found"}
+    return 200, result
+
+
+def _require_app_id(body):
+    try:
+        return int((body or {}).get("application_id"))
+    except (TypeError, ValueError):
+        raise validation.ValidationError("application_id is required", "application_id")
+
+
+@route("POST", r"/api/tracker/interviews")
+def add_tracker_interview(handler, match, query, body):
+    body = body or {}
+    result = repository.add_tracker_interview(
+        _require_app_id(body),
+        body.get("scheduled_for", ""),
+        body.get("round", "Interview 1"),
+        body.get("description", ""),
+    )
+    if result is None:
+        return 404, {"error": "Application not found"}
+    return 201, result
+
+
+@route("POST", r"/api/tracker/assessments")
+def add_tracker_assessment(handler, match, query, body):
+    body = body or {}
+    result = repository.add_tracker_assessment(
+        _require_app_id(body),
+        body.get("scheduled_for", ""),
+        body.get("description", ""),
+    )
+    if result is None:
+        return 404, {"error": "Application not found"}
+    return 201, result
+
+
 @route("GET", r"/api/stats/summary")
 def stats_summary(handler, match, query, body):
     return 200, repository.get_summary_stats()
@@ -159,22 +227,58 @@ def stats_analytics(handler, match, query, body):
 
 @route("GET", r"/api/gmail/sync-status")
 def gmail_sync_status(handler, match, query, body):
-    # Read-only: this app never talks to Gmail itself. It only displays
-    # whatever a Claude Desktop/Cowork session last wrote to
-    # data/gmail_sync_state.json after doing the actual sync.
-    state = gmail_sync.load_sync_state()
-    unresolved_count = len(gmail_sync.load_unresolved())
+    # The sync itself is done either by an AI assistant (manual), the local
+    # scheduler shelling out to a CLI, or the scheduler running the keys-based
+    # job in-process. All three write data/gmail_sync_state.json the same way.
+    state = sync_state.load_sync_state()
+    cfg = sync_config.load()
     return 200, {
         "lastSuccessfulSync": state.get("lastSuccessfulSync"),
+        "connectedAccount": state.get("connectedAccount"),
         "lastSyncResult": state.get("lastSyncResult"),
-        "unresolvedCount": unresolved_count,
+        "unresolvedCount": len(sync_state.load_unresolved()),
         "processedMessageCount": len(state.get("processedMessageIds", [])),
+        "method": cfg["method"],
+        "autoEnabled": cfg["auto"]["enabled"],
+        "intervalHours": cfg["auto"]["interval_hours"],
+        "running": sync_scheduler.is_running,
+        "lastRun": sync_last_run(),
     }
 
 
 @route("GET", r"/api/gmail/unresolved")
 def gmail_unresolved(handler, match, query, body):
-    return 200, {"items": gmail_sync.load_unresolved()}
+    return 200, {"items": sync_state.load_unresolved()}
+
+
+# --- Sync configuration + automation ------------------------------------
+
+@route("GET", r"/api/sync/config")
+def sync_config_get(handler, match, query, body):
+    return 200, sync_config.get_public()
+
+
+@route("PUT", r"/api/sync/config")
+def sync_config_put(handler, match, query, body):
+    updated = sync_config.update(body or {})
+    sync_doctor.invalidate()  # next GET /api/sync/doctor recomputes
+    return 200, updated
+
+
+@route("GET", r"/api/sync/doctor")
+def sync_doctor_get(handler, match, query, body):
+    force = query.get("force", ["0"])[0] in ("1", "true", "yes")
+    return 200, sync_doctor.report(force=force)
+
+
+@route("POST", r"/api/sync/test-imap")
+def sync_test_imap(handler, match, query, body):
+    return 200, sync_doctor.check_imap_login()
+
+
+@route("POST", r"/api/sync/run")
+def sync_run_now(handler, match, query, body):
+    return 202, sync_scheduler.run_now_async(trigger="manual")
 
 
 @route("GET", r"/api/export/json")
@@ -216,16 +320,6 @@ def import_csv(handler, match, query, body_raw_text):
 def backup(handler, match, query, body):
     path = repository.backup_database()
     return 200, {"backup_path": path, "filename": os.path.basename(path)}
-
-
-@route("GET", r"/api/applications/(?P<id>\d+)/find-similar")
-def find_similar(handler, match, query, body):
-    # Kept for parity with the future-automation helper find_matching_application;
-    # not used by the current UI but exercised here so the function is reachable via HTTP too.
-    app = repository.get_application(int(match.group("id")))
-    if app is None:
-        return 404, {"error": "Application not found"}
-    return 200, app
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +429,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     database.ensure_data_dirs()
     database.get_connection()  # creates schema on first run
+    sync_scheduler.start()     # no-op until the user opts into automatic sync
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"JobTrace server running at http://{HOST}:{PORT}")
     print(f"Database: {database.DB_PATH}")

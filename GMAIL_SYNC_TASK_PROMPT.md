@@ -22,7 +22,7 @@ This is a read-only Gmail task. You may search and read Gmail, but do NOT:
 - unsubscribe from anything
 - modify Gmail in any way
 
-Only modify the local JobTrace files, and only through `backend/repository.py` and `backend/gmail_sync.py` functions — never with hand-written SQL or by editing JSON files directly. You do not need to stop the local server before writing; the database runs in WAL mode specifically so a background sync and the running dashboard can coexist safely.
+Only modify the local JobTrace files, and only through `backend/repository.py` and `backend/sync/state.py` functions — never with hand-written SQL or by editing JSON files directly. You do not need to stop the local server before writing; the database runs in WAL mode specifically so a background sync and the running dashboard can coexist safely.
 
 ## 1. Read JobTrace before touching Gmail
 
@@ -38,11 +38,11 @@ Do not modify anything yet.
 
 Determine the timestamp of `lastSuccessfulSync`.
 
-**If a previous successful sync exists:** only investigate emails received after that timestamp, with a ~24 hour overlap to avoid missing delayed or threaded correspondence. Regardless of the window, use Gmail message IDs to ensure previously processed emails are never processed twice — check both `gmail_sync.is_message_processed` (the JSON state file) and `repository.has_processed_gmail_message` (a second, database-level check) before acting on any message.
+**If a previous successful sync exists:** only investigate emails received after that timestamp, with a ~24 hour overlap to avoid missing delayed or threaded correspondence. Regardless of the window, use Gmail message IDs to ensure previously processed emails are never processed twice — check both `sync_state.is_message_processed` (the JSON state file) and `repository.has_processed_gmail_message` (a second, database-level check) before acting on any message.
 
 **If there has never been a successful sync:** inspect recruitment-related emails from the last 30 days. Do not indiscriminately read the entire mailbox.
 
-**Before searching, reconcile the unresolved queue:** for each item already in `data/unresolved_gmail_items.json`, check whether a matching application now exists in JobTrace (the user sometimes resolves these manually through the UI without telling you). If a match exists, remove the stale unresolved entry with `gmail_sync.remove_unresolved_item` instead of leaving a duplicate signal sitting there.
+**Before searching, reconcile the unresolved queue:** for each item already in `data/unresolved_gmail_items.json`, check whether a matching application now exists in JobTrace (the user sometimes resolves these manually through the UI without telling you). If a match exists, remove the stale unresolved entry with `sync_state.remove_unresolved_item` instead of leaving a duplicate signal sitting there.
 
 ## 2. Search Gmail — two passes, not one
 
@@ -68,7 +68,7 @@ Do NOT rely only on keywords — interpret the actual context of the message. Ig
 
 ## 3. Process only unprocessed Gmail messages
 
-Before using any email, check its Gmail message ID against both `gmail_sync.is_message_processed` and `repository.has_processed_gmail_message`. If it's already there, skip it entirely — a previously processed email must never create another application, create another event, or change a stage/outcome again.
+Before using any email, check its Gmail message ID against both `sync_state.is_message_processed` and `repository.has_processed_gmail_message`. If it's already there, skip it entirely — a previously processed email must never create another application, create another event, or change a stage/outcome again.
 
 The synchronization must be idempotent: running this task twice over the same emails must leave JobTrace unchanged the second time.
 
@@ -168,11 +168,13 @@ If Gmail appears to contradict JobTrace, don't immediately overwrite — check t
 
 ## 12. Record unresolved items
 
-If you cannot confidently determine the company, the position, which application an email belongs to, or whether an email actually changes anything — do not guess. Add it via `gmail_sync.add_unresolved_item` with: Gmail message ID, email date, sender, subject, likely company, likely position, likely event type, candidate application IDs if any, and a clear reason. Don't store the full email body — enough context for the user to look it up later is sufficient.
+If you cannot confidently determine the company, the position, which application an email belongs to, or whether an email actually changes anything — do not guess. Add it via `sync_state.add_unresolved_item` with: Gmail message ID, email date, sender, subject, likely company, likely position, likely event type, candidate application IDs if any, and a clear reason. Don't store the full email body — enough context for the user to look it up later is sufficient.
 
 ## 13. Update synchronization state
 
-Only after the sync completes successfully: call `gmail_sync.record_sync_result` with the run's counters (emails reviewed, recruitment-related, applications created, applications updated, rejections/assessments/interviews/offers detected, ignored, unresolved), then `gmail_sync.save_sync_state`. This stamps `lastSuccessfulSync` and is what the dashboard's Gmail pill reads.
+Only after the sync completes successfully: call `sync_state.record_sync_result` with the run's counters (emails reviewed, recruitment-related, applications created, applications updated, rejections/assessments/interviews/offers detected, ignored, unresolved), then `sync_state.save_sync_state`. This stamps `lastSuccessfulSync` and is what the dashboard's Gmail pill reads.
+
+Also record which mailbox you read: determine the Gmail address of the account you're connected to (e.g. from the `From:` header of one of your own messages in `label:sent`), then call `sync_state.set_connected_account(state, "<that address>")` before the final `save_sync_state`. The dashboard shows this so the user can catch a sync that ran against the wrong inbox.
 
 **Do not update `lastSuccessfulSync` if the process fails or is interrupted before completing** — mark each message processed as you go (not batched at the end) so a partial run doesn't lose its place, but only call `record_sync_result` at the very end of a fully completed run.
 

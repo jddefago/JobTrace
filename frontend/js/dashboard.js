@@ -162,6 +162,9 @@ const Dashboard = (() => {
     tableStale = true;
     const tasks = [loadSummary(), showTableIfActive()];
     if (typeof Analytics !== "undefined") tasks.push(Analytics.refresh());
+    if (typeof Tracker !== "undefined" && document.getElementById("view-tracker").classList.contains("active")) {
+      tasks.push(Tracker.refresh());
+    }
     await Promise.all(tasks);
   }
 

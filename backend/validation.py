@@ -54,6 +54,28 @@ def require_date(value, field):
     return value
 
 
+def optional_datetime(value, field):
+    """Accepts '' / None, a 'YYYY-MM-DD' date, or a 'YYYY-MM-DDTHH:MM' local
+    datetime (what an <input type=datetime-local> emits). Returns the string
+    unchanged, or '' to mean 'cleared'."""
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValidationError(f"{field} must be text", field)
+    value = value.strip()
+    if not value:
+        return ""
+    if len(value) > 25:
+        raise ValidationError(f"{field} is not a valid date-time", field)
+    try:
+        datetime.datetime.fromisoformat(value)
+    except ValueError:
+        raise ValidationError(
+            f"{field} must be an ISO date or date-time (YYYY-MM-DD or YYYY-MM-DDTHH:MM)", field
+        )
+    return value
+
+
 def require_stage(value):
     value = require_text(value, "stage", max_len=50)
     if value not in constants.ALL_STAGES:
@@ -131,5 +153,15 @@ def validate_event_payload(data, partial=False):
         out["description"] = optional_text(
             data.get("description"), "description", max_len=5000
         )
+    if touched("scheduled_for"):
+        out["scheduled_for"] = optional_datetime(data.get("scheduled_for"), "scheduled_for")
+    if touched("item_status"):
+        raw = data.get("item_status")
+        raw = "" if raw is None else str(raw).strip()
+        if raw and raw not in constants.ITEM_STATUSES:
+            raise ValidationError(
+                f"item_status must be one of: {', '.join(constants.ITEM_STATUSES)}", "item_status"
+            )
+        out["item_status"] = raw
 
     return out

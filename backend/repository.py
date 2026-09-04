@@ -21,7 +21,6 @@ import csv
 import datetime
 import io
 import os
-import shutil
 import sqlite3
 import threading
 
@@ -386,18 +385,22 @@ def find_matching_application(company, position=None):
 # Events
 # ---------------------------------------------------------------------------
 
-def _insert_event(conn, application_id, event_type, event_date, description, source, gmail_message_id=None):
+def _insert_event(conn, application_id, event_type, event_date, description, source,
+                  gmail_message_id=None, scheduled_for=None, item_status=None):
     now = _now_iso()
     conn.execute(
         """
-        INSERT INTO application_events (application_id, event_type, event_date, description, source, gmail_message_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO application_events (application_id, event_type, event_date, description, source,
+                                       gmail_message_id, scheduled_for, item_status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (application_id, event_type, event_date, description or "", source, gmail_message_id, now),
+        (application_id, event_type, event_date, description or "", source, gmail_message_id,
+         scheduled_for or None, item_status or None, now),
     )
 
 
-def add_event(application_id, event_type, event_date, description="", source="manual", gmail_message_id=None):
+def add_event(application_id, event_type, event_date, description="", source="manual",
+              gmail_message_id=None, scheduled_for=None, item_status=None):
     with _write_lock:
         conn = database.get_connection()
         app_exists = conn.execute(
@@ -407,12 +410,18 @@ def add_event(application_id, event_type, event_date, description="", source="ma
             return None
 
         clean = validation.validate_event_payload(
-            {"event_type": event_type, "event_date": event_date, "description": description},
+            {
+                "event_type": event_type, "event_date": event_date, "description": description,
+                "scheduled_for": scheduled_for or "", "item_status": item_status or "",
+            },
             partial=False,
         )
 
         try:
-            _insert_event(conn, application_id, clean["event_type"], clean["event_date"], clean["description"], source, gmail_message_id)
+            _insert_event(
+                conn, application_id, clean["event_type"], clean["event_date"], clean["description"],
+                source, gmail_message_id, clean.get("scheduled_for"), clean.get("item_status"),
+            )
             conn.commit()
         except Exception:
             conn.rollback()
@@ -426,7 +435,7 @@ def add_event(application_id, event_type, event_date, description="", source="ma
 
 def has_processed_gmail_message(gmail_message_id):
     """Secondary, DB-level duplicate guard. The primary idempotency check
-    is data/gmail_sync_state.json (see backend/gmail_sync.py) -- this just
+    is data/gmail_sync_state.json (see backend/sync/state.py) -- this just
     makes sure a message can never leave two events behind even if the
     JSON state file and the database ever disagree."""
     if not gmail_message_id:
@@ -451,6 +460,12 @@ def update_event(event_id, data):
         clean = validation.validate_event_payload(data or {}, partial=True)
         if not clean:
             return _row_to_dict(existing)
+
+        # Store a cleared optional field as NULL, not an empty string, so the
+        # Tracker queries can COALESCE on it cleanly.
+        for nullable in ("scheduled_for", "item_status"):
+            if nullable in clean and clean[nullable] == "":
+                clean[nullable] = None
 
         set_parts = [f"{col} = ?" for col in clean]
         set_values = list(clean.values())
@@ -481,6 +496,246 @@ def delete_event(event_id):
             conn.rollback()
             raise
         return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Tracker: outstanding assessments + scheduled interviews
+# ---------------------------------------------------------------------------
+
+def _get_event_with_app(conn, event_id):
+    return conn.execute(
+        """
+        SELECT e.*, a.current_stage AS app_stage, a.outcome AS app_outcome
+        FROM application_events e JOIN applications a ON a.id = e.application_id
+        WHERE e.id = ?
+        """,
+        (event_id,),
+    ).fetchone()
+
+
+def get_tracker():
+    """Feed for the Tracker view.
+
+    Assessments are keyed by *application*: any application that is at the
+    Assessment stage (or has an Assessment Invitation event) and hasn't been
+    marked complete or rejected is an outstanding item. Interviews are keyed
+    by *event*, since one application can have several interview rounds.
+    """
+    conn = database.get_connection()
+
+    # --- Assessments (one row per application) ---
+    app_rows = conn.execute(
+        f"""
+        SELECT a.id AS application_id, a.company, a.position, a.location,
+               a.current_stage, a.outcome,
+               (SELECT COUNT(*) FROM application_events x
+                  WHERE x.application_id = a.id AND x.event_type = 'Assessment Completed') AS completed_events,
+               inv.id           AS event_id,
+               inv.event_date   AS invited_date,
+               NULLIF(inv.scheduled_for, '') AS scheduled_for,
+               NULLIF(inv.item_status, '')   AS item_status,
+               inv.description  AS description
+        FROM applications a
+        LEFT JOIN application_events inv ON inv.id = (
+            SELECT y.id FROM application_events y
+            WHERE y.application_id = a.id AND y.event_type = 'Assessment Invitation'
+            ORDER BY y.event_date DESC, y.id DESC LIMIT 1
+        )
+        WHERE (a.current_stage = 'Assessment' OR inv.id IS NOT NULL)
+          AND a.outcome NOT IN ('Negative', 'Withdrawn')
+        ORDER BY COALESCE(NULLIF(inv.scheduled_for, ''), inv.event_date, a.application_date) ASC
+        """
+    ).fetchall()
+    assessments = []
+    for r in app_rows:
+        d = _row_to_dict(r)
+        d["completed"] = bool(d.pop("completed_events")) or d.get("item_status") == "completed"
+        # Past the assessment stage already (moved on to interviews) -> done.
+        moved_on = constants.STAGE_RANK.get(d["current_stage"], 0) > constants.STAGE_RANK["Assessment"]
+        d["completed"] = d["completed"] or moved_on
+        d["when"] = d.get("scheduled_for") or d.get("invited_date")
+        assessments.append(d)
+
+    # --- Interviews (one row per Interview Invitation event) ---
+    ph = ",".join("?" * len(constants.TRACKER_INTERVIEW_TYPES))
+    int_rows = conn.execute(
+        f"""
+        SELECT e.id AS event_id, e.application_id, e.event_type, e.event_date,
+               NULLIF(e.scheduled_for, '') AS scheduled_for,
+               NULLIF(e.item_status, '')   AS item_status,
+               e.description,
+               a.company, a.position, a.location, a.current_stage, a.outcome
+        FROM application_events e
+        JOIN applications a ON a.id = e.application_id
+        WHERE e.event_type IN ({ph})
+        ORDER BY COALESCE(NULLIF(e.scheduled_for, ''), e.event_date) ASC, e.id ASC
+        """,
+        constants.TRACKER_INTERVIEW_TYPES,
+    ).fetchall()
+    interviews = []
+    for r in int_rows:
+        d = _row_to_dict(r)
+        d["when"] = d.get("scheduled_for") or d.get("event_date")
+        d["application_dead"] = d.get("outcome") in ("Negative", "Withdrawn")
+        interviews.append(d)
+
+    return {"assessments": assessments, "interviews": interviews}
+
+
+def set_item_schedule(event_id, scheduled_for):
+    """Set (or clear, with '') the date/time an assessment is due or an
+    interview takes place. Returns the refreshed tracker feed."""
+    updated = update_event(event_id, {"scheduled_for": scheduled_for or ""})
+    if updated is None:
+        return None
+    return get_tracker()
+
+
+def complete_assessment(application_id, completed=True):
+    """Mark an application's assessment done (or reopen it). Adds/removes an
+    'Assessment Completed' timeline event and flips item_status on any open
+    Assessment Invitation event."""
+    with _write_lock:
+        conn = database.get_connection()
+        app = conn.execute("SELECT id FROM applications WHERE id = ?", (application_id,)).fetchone()
+        if app is None:
+            return None
+        try:
+            conn.execute(
+                "UPDATE application_events SET item_status = ? WHERE application_id = ? AND event_type = 'Assessment Invitation'",
+                ("completed" if completed else None, application_id),
+            )
+            existing = conn.execute(
+                "SELECT id FROM application_events WHERE application_id = ? AND event_type = 'Assessment Completed' ORDER BY id LIMIT 1",
+                (application_id,),
+            ).fetchone()
+            if completed and existing is None:
+                _insert_event(
+                    conn, application_id, "Assessment Completed", _today_iso(),
+                    "Marked complete from the Tracker.", "manual",
+                )
+            elif not completed and existing is not None:
+                conn.execute("DELETE FROM application_events WHERE id = ?", (existing["id"],))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return get_tracker()
+
+
+def _next_interview_round(current_stage):
+    """The interview round after `current_stage`, or None if the next step
+    is an offer/decision rather than another interview."""
+    rounds = constants.INTERVIEW_ROUNDS
+    if current_stage in rounds:
+        idx = rounds.index(current_stage)
+        return rounds[idx + 1] if idx + 1 < len(rounds) else None
+    # Below the interview stages (e.g. an interview logged while still at
+    # Screening) -> the first round is the "next" one.
+    return rounds[0]
+
+
+INTERVIEW_RESULTS = ("offer", "next_round", "not_selected", "pending")
+
+
+def set_interview_result(event_id, result):
+    """Record how an interview went — the three real outcomes plus a reset:
+
+      offer        -> application to Offer / Positive, adds an Offer event
+      next_round    -> application to the next interview round, adds a Next
+                       Round event and a fresh Interview Invitation to schedule
+      not_selected -> application to Closed / Negative, adds a Rejection event
+      pending       -> clears the recorded result (no stage change)
+
+    Interview outcomes are frequently never emailed, so this is the manual
+    path for them.
+    """
+    if result not in INTERVIEW_RESULTS:
+        raise validation.ValidationError(
+            "result must be one of: " + ", ".join(INTERVIEW_RESULTS), "result")
+
+    with _write_lock:
+        conn = database.get_connection()
+        ev = _get_event_with_app(conn, event_id)
+        if ev is None or ev["event_type"] not in constants.TRACKER_INTERVIEW_TYPES:
+            return None
+        app_id = ev["application_id"]
+        next_round = _next_interview_round(ev["app_stage"])
+
+        if result == "next_round" and next_round is None:
+            raise validation.ValidationError(
+                "This is already the final interview — record an offer or 'not selected' instead.", "result")
+
+        event_status = None if result == "pending" else ("failed" if result == "not_selected" else "passed")
+        try:
+            conn.execute(
+                "UPDATE application_events SET item_status = ? WHERE id = ?",
+                (event_status, event_id),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    if result == "not_selected":
+        update_application(app_id, {"current_stage": "Closed", "outcome": "Negative"})
+        add_event(app_id, "Rejection", _today_iso(),
+                  "Not selected after interview (recorded in Tracker).")
+    elif result == "offer":
+        update_application(app_id, {"current_stage": "Offer", "outcome": "Positive"})
+        add_event(app_id, "Offer", _today_iso(),
+                  "Offer received after interview (recorded in Tracker).")
+    elif result == "next_round":
+        update_application(app_id, {"current_stage": next_round, "outcome": "Positive"})
+        add_event(app_id, "Next Round", _today_iso(),
+                  f"Advanced to {next_round} after interview (recorded in Tracker).")
+        add_event(app_id, "Interview Invitation", _today_iso(),
+                  f"{next_round} — set the date.", "manual", item_status="scheduled")
+
+    return get_tracker()
+
+
+def add_tracker_interview(application_id, scheduled_for, round_stage="Interview 1", description=""):
+    """Create an interview from the Tracker (not from an email): an
+    'Interview Invitation' event carrying its date/time, and advance the
+    application to that interview round if it isn't there yet."""
+    with _write_lock:
+        conn = database.get_connection()
+        app = conn.execute("SELECT * FROM applications WHERE id = ?", (application_id,)).fetchone()
+        if app is None:
+            return None
+        if round_stage not in constants.INTERVIEW_ROUNDS:
+            round_stage = "Interview 1"
+
+    clean_dt = validation.optional_datetime(scheduled_for or "", "scheduled_for")
+    event_date = (clean_dt[:10] if clean_dt else _today_iso())
+    add_event(application_id, "Interview Invitation", event_date,
+              description or "Interview scheduled from the Tracker.", "manual",
+              scheduled_for=clean_dt, item_status="scheduled")
+
+    app = get_application(application_id)
+    if app and constants.STAGE_RANK.get(app["current_stage"], -1) < constants.STAGE_RANK.get(round_stage, 0) \
+            and app["current_stage"] != "Closed":
+        update_application(application_id, {"current_stage": round_stage, "outcome": "Positive"})
+    return get_tracker()
+
+
+def add_tracker_assessment(application_id, scheduled_for="", description=""):
+    """Create an assessment from the Tracker: an 'Assessment Invitation'
+    event and (if not further along) move the application to Assessment."""
+    conn = database.get_connection()
+    app = conn.execute("SELECT * FROM applications WHERE id = ?", (application_id,)).fetchone()
+    if app is None:
+        return None
+    clean_dt = validation.optional_datetime(scheduled_for or "", "scheduled_for")
+    add_event(application_id, "Assessment Invitation", _today_iso(),
+              description or "Assessment added from the Tracker.", "manual",
+              scheduled_for=clean_dt, item_status="scheduled")
+    app = get_application(application_id)
+    if app and constants.STAGE_RANK.get(app["current_stage"], -1) < constants.STAGE_RANK["Assessment"] \
+            and app["current_stage"] != "Closed":
+        update_application(application_id, {"current_stage": "Assessment", "outcome": "Positive"})
+    return get_tracker()
 
 
 # ---------------------------------------------------------------------------

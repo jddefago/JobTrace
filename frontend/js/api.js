@@ -60,10 +60,23 @@ const Api = (() => {
     getSummary: () => request("GET", "/api/stats/summary"),
     getAnalytics: (granularity) => request("GET", "/api/stats/analytics" + qs({ granularity })),
 
+    getTracker: () => request("GET", "/api/tracker"),
+    setEventSchedule: (eventId, scheduledFor) => request("PUT", `/api/events/${eventId}/schedule`, { scheduled_for: scheduledFor }),
+    completeAssessment: (applicationId, completed) => request("POST", `/api/applications/${applicationId}/assessment-complete`, { completed }),
+    setInterviewResult: (eventId, result) => request("POST", `/api/events/${eventId}/interview-result`, { result }),
+    addTrackerInterview: (data) => request("POST", "/api/tracker/interviews", data),
+    addTrackerAssessment: (data) => request("POST", "/api/tracker/assessments", data),
+
     backupDatabase: () => request("POST", "/api/backup"),
 
     getGmailSyncStatus: () => request("GET", "/api/gmail/sync-status"),
     getGmailUnresolved: () => request("GET", "/api/gmail/unresolved"),
+
+    getSyncConfig: () => request("GET", "/api/sync/config"),
+    updateSyncConfig: (patch) => request("PUT", "/api/sync/config", patch),
+    getSyncDoctor: (force) => request("GET", "/api/sync/doctor" + (force ? "?force=1" : "")),
+    testImap: () => request("POST", "/api/sync/test-imap", {}),
+    runSyncNow: () => request("POST", "/api/sync/run", {}),
 
     importCsv: async (csvText) => {
       const res = await fetch("/api/import/csv", {

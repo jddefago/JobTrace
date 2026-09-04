@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS application_events (
     event_date          TEXT    NOT NULL,
     description         TEXT,
     source              TEXT    NOT NULL DEFAULT 'manual',
-    gmail_message_id    TEXT,
+    gmail_message_id    TEXT,          -- the Gmail message an event came from
+    scheduled_for       TEXT,          -- Tracker: assessment due / interview slot
+    item_status         TEXT,          -- Tracker: this item's own outcome
     created_at          TEXT    NOT NULL,
     FOREIGN KEY (application_id) REFERENCES applications(id) ON DELETE CASCADE
 );
@@ -71,15 +73,12 @@ def ensure_data_dirs():
     os.makedirs(BACKUP_DIR, exist_ok=True)
 
 
-def _backup_before_migration():
-    """Safety net for schema migrations against a database that may
-    already hold real data. Cheap and skipped entirely for a fresh
-    (not-yet-created) database."""
-    if not os.path.exists(DB_PATH):
-        return
+def _backup_database(reason):
+    """Copy the live DB to backups/ before a migration touches it. Caller
+    decides when it's warranted (i.e. there are real columns to add)."""
     ensure_data_dirs()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(BACKUP_DIR, f"pre_gmail_integration_{timestamp}.db")
+    backup_path = os.path.join(BACKUP_DIR, f"{reason}_{timestamp}.db")
     src = sqlite3.connect(DB_PATH)
     dest = sqlite3.connect(backup_path)
     try:
@@ -89,15 +88,40 @@ def _backup_before_migration():
         src.close()
 
 
+def _column_names(conn, table):
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+# Columns added after a table's original CREATE. On a fresh database these are
+# already in SCHEMA, so _migrate_schema is a genuine no-op; it only does work
+# for a database created by an older JobTrace.
+_MIGRATIONS = {
+    "application_events": [
+        ("gmail_message_id", "TEXT"),
+        ("scheduled_for", "TEXT"),
+        ("item_status", "TEXT"),
+    ],
+}
+
+
 def _migrate_schema(conn):
-    """Idempotent, additive-only migrations for databases created before
-    a given column/index existed. Never drops or rewrites existing data."""
-    cols = [row["name"] for row in conn.execute("PRAGMA table_info(application_events)").fetchall()]
-    if "gmail_message_id" not in cols:
-        _backup_before_migration()
-        conn.execute("ALTER TABLE application_events ADD COLUMN gmail_message_id TEXT")
-        conn.commit()
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_gmail_message_id ON application_events(gmail_message_id)")
+    """Idempotent, additive-only migrations for databases created before a
+    given column existed. Never drops or rewrites existing data."""
+    pending = [
+        (table, col, decl)
+        for table, cols in _MIGRATIONS.items()
+        for col, decl in cols
+        if col not in _column_names(conn, table)
+    ]
+    if pending and os.path.exists(DB_PATH):
+        _backup_database("pre_migration")
+    for table, col, decl in pending:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_events_gmail_message_id "
+        "ON application_events(gmail_message_id)"
+    )
     conn.commit()
 
 

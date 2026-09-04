@@ -17,13 +17,14 @@ import datetime
 import json
 import os
 
-from . import database
+from .. import database
 
 SYNC_STATE_PATH = os.path.join(database.DATA_DIR, "gmail_sync_state.json")
 UNRESOLVED_PATH = os.path.join(database.DATA_DIR, "unresolved_gmail_items.json")
 
 DEFAULT_SYNC_STATE = {
     "lastSuccessfulSync": None,
+    "connectedAccount": None,  # which Gmail address the last sync actually read
     "processedMessageIds": [],
     "lastSyncResult": {
         "emailsReviewed": 0,
@@ -67,6 +68,7 @@ def _write_json_atomic(path, data):
 def load_sync_state():
     state = _read_json(SYNC_STATE_PATH, DEFAULT_SYNC_STATE)
     state.setdefault("lastSuccessfulSync", None)
+    state.setdefault("connectedAccount", None)
     state.setdefault("processedMessageIds", [])
     state.setdefault("lastSyncResult", dict(DEFAULT_SYNC_STATE["lastSyncResult"]))
     return state
@@ -74,6 +76,13 @@ def load_sync_state():
 
 def save_sync_state(state):
     _write_json_atomic(SYNC_STATE_PATH, state)
+
+
+def set_connected_account(state, address):
+    """Record the Gmail address this sync run is reading from. Surfaced in
+    the dashboard so a sync run against the wrong mailbox (wrong Claude
+    account / wrong connector) is visible before it imports anything."""
+    state["connectedAccount"] = (address or "").strip() or None
 
 
 def is_message_processed(state, gmail_message_id):

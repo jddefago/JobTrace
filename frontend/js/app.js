@@ -14,6 +14,7 @@ function switchView(viewName) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === viewName));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${viewName}`));
   if (viewName === "analytics") Dashboard.showTableIfActive();
+  if (viewName === "tracker" && typeof Tracker !== "undefined") Tracker.refresh();
 }
 
 function bindTabs() {
@@ -26,7 +27,7 @@ async function bootstrap() {
   try {
     State.meta = await Api.getMeta();
   } catch (err) {
-    Utils.toast("Could not connect to the local server at http://localhost:8766. Make sure start.bat is running.", "error");
+    Utils.toast("Could not reach the JobTrace server at http://localhost:8766 — start it with start.command (macOS) or start.bat (Windows).", "error");
     return;
   }
 
@@ -34,6 +35,7 @@ async function bootstrap() {
   AppForm.init();
   Detail.init();
   Dashboard.init();
+  Tracker.init();
   Analytics.init();
   ImportExport.init();
   GmailSync.init();

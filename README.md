@@ -3,26 +3,28 @@
 A local-first dashboard for tracking job applications: pipeline stage, outcome,
 timeline history, job descriptions, notes, and application statistics.
 
-Everything runs on your computer. There is no cloud service, no external
-account, and no data leaves your machine. The entire app is a local Python
-web server (stdlib only) serving a plain HTML/CSS/JS frontend, backed by a
-single SQLite file.
+Everything runs on your computer. There is no cloud service and no external
+account. The entire app is a local Python web server (stdlib only) serving a
+plain HTML/CSS/JS frontend, backed by a single SQLite file.
 
-This is Phase 1. Gmail integration, AI classification, scheduled background
-workers, and cloud sync are explicitly **not** part of this build — see
-[Future automation](#future-automation) for how this phase was designed to
-support them later without a rewrite.
+**Optional Gmail sync** reads your inbox for recruiter replies and updates
+the tracker. It's off by default, has three setup levels (from "ask your AI
+assistant" with zero setup, to fully unattended), and nothing leaves your
+machine unless you turn it on — see
+[Gmail synchronization](#gmail-synchronization).
 
 ## Getting started
 
-Just downloaded this? The fastest path is to open this folder with your AI
-coding assistant (Claude Code, Claude Desktop, Codex CLI, or similar) and
-ask it to set JobTrace up for you — it can read **[SETUP.md](SETUP.md)**,
-a self-contained guide written for exactly that, and walk you through
-starting the app and (optionally) linking your own Gmail. No account,
-API key, or payment is required for the base app.
+**Fastest:** double-click **`setup.command`** (macOS) or **`setup.bat`**
+(Windows). It checks for Python, creates a desktop launcher, starts the
+server, and opens the dashboard. Re-run it any time.
 
-Prefer to do it by hand? See [Requirements](#requirements) and
+**With an AI assistant:** open this folder with Claude Code / Claude Desktop
+/ Codex and ask it to "set up JobTrace" — it reads **[SETUP.md](SETUP.md)**,
+a self-contained guide for exactly that. No account, API key, or payment is
+required for the tracker itself.
+
+**By hand:** see [Requirements](#requirements) and
 [Starting the app](#starting-the-app) below.
 
 ## What it does
@@ -39,95 +41,80 @@ Prefer to do it by hand? See [Requirements](#requirements) and
 - A **dashboard** with summary metrics, response/interview conversion rates,
   and a searchable, sortable, filterable, paginated table (built to stay fast
   past 1,000+ applications).
+- A **Tracker** tab for the things email can't tell you: a to-do list of
+  assessments you haven't finished (with deadlines and a "mark completed"
+  button), and your interviews as a list or month calendar — set the exact
+  date/time, and record the outcome yourself (offer / next round / not
+  selected), since that's often never emailed.
 - An **analytics** view: applications over time, a response funnel, stage and
   outcome distribution, and per-source performance.
 - **CSV/JSON export**, **CSV import** with validation, and one-click
   **database backup**.
+- **Optional Gmail sync** (off by default) that reads recruiter mail and
+  updates all of the above — see [below](#gmail-synchronization).
 
 ## Folder structure
 
 ```
-JobTracker/
+JobTrace/
 ├── backend/
 │   ├── server.py        # HTTP server + routing (stdlib http.server only)
-│   ├── repository.py    # All business logic & DB access — the module a
-│   │                     # future automation script should import directly
-│   ├── database.py      # Connection handling + schema (SQLite)
-│   ├── validation.py    # Input validation shared by every write path
-│   ├── constants.py     # Allowed stages / outcomes / sources / event types
-│   ├── gmail_sync.py    # Local JSON state for Gmail sync (see below) —
-│   │                     # no network calls, just file I/O
-│   └── gmail_api_sync.py # Optional: headless Gmail sync via your own
-│                         # Google + Anthropic API keys — see GMAIL_SYNC_API.md
+│   ├── repository.py    # all business logic & DB access — import this directly
+│   ├── database.py      # connection handling + schema + additive migrations
+│   ├── validation.py    # input validation shared by every write path
+│   ├── constants.py     # allowed stages / outcomes / sources / event types
+│   └── sync/            # Gmail synchronization
+│       ├── state.py     #   data/gmail_sync_state.json + unresolved items
+│       ├── config.py    #   data/sync_config.json (method, schedule, secrets)
+│       ├── doctor.py    #   "can automatic sync run, and what's missing?"
+│       ├── scheduler.py #   in-process timer + the two execution paths
+│       ├── agent.py     #   the keys-based sync agent (Anthropic API)
+│       └── imap.py      #   read-only Gmail over an app password
 ├── frontend/
-│   ├── index.html
-│   ├── styles.css
 │   └── js/
-│       ├── api.js         # fetch wrapper for the backend API
-│       ├── utils.js        # formatting, badges, toasts, confirm dialog
-│       ├── charts.js       # dependency-free SVG/bar chart rendering
-│       ├── dashboard.js    # summary cards, filters, table, pagination
-│       ├── modal.js        # add/edit application side panel
-│       ├── detail.js       # application detail panel + timeline events
-│       ├── analytics.js    # analytics view
-│       ├── importexport.js # export menu, backup, CSV import
-│       └── app.js          # bootstrap, tab navigation, shared state
-├── data/
-│   ├── applications.db             # created automatically on first run (gitignored)
-│   ├── gmail_sync_state.json       # last Gmail sync result + processed message IDs
-│   └── unresolved_gmail_items.json # emails a Gmail sync couldn't confidently act on
-├── backups/              # timestamped DB backups land here (gitignored)
-├── assets/
-│   └── logo.ico          # used by the Windows desktop shortcut
-├── start.bat             # Windows: launch (hidden, background)
-├── start_hidden.vbs      # Windows: no-window wrapper around start.bat
-├── stop.bat              # Windows: stop
-├── JobTrace.lnk          # ready-made Windows Desktop shortcut — drag this onto your Desktop
-├── start.command         # macOS: launch (background, opens browser)
-├── stop.command          # macOS: stop
-├── requirements.txt      # only needed for the optional headless API Gmail sync
-├── SETUP.md              # self-contained setup guide for a fresh AI assistant session
-├── GMAIL_SYNC.md         # sync policy/rules an AI assistant (or gmail_api_sync.py) follows
-├── GMAIL_SYNC_TASK_PROMPT.md # ready-to-paste prompt for a future scheduled sync task
-├── GMAIL_SYNC_API.md     # setup guide for the headless, no-assistant-app sync option
-├── run_gmail_sync_claude.bat / .sh # scheduled-sync runner for Claude Code (Windows / macOS)
-├── run_gmail_sync_codex.bat / .sh  # scheduled-sync runner for Codex CLI (Windows / macOS)
-├── run_gmail_sync_api.bat / .sh    # scheduled-sync runner for the headless API path
-├── com.jobtrace.gmailsync.plist.example # macOS launchd template for scheduled sync
+│       ├── dashboard.js  # summary cards, filters, table, pagination
+│       ├── tracker.js    # Tracker tab: assessment to-dos + interviews
+│       ├── analytics.js  # analytics view
+│       ├── detail.js     # application detail panel + timeline
+│       ├── gmailsync.js  # Gmail pill + sync status/settings modal
+│       └── …              # api.js, utils.js, charts.js, modal.js, importexport.js, app.js
+├── tests/               # stdlib unittest — python3 -m unittest discover tests
+├── data/                 # per-install, all gitignored
+│   ├── applications.db             # created on first run
+│   ├── sync_config.json            # sync method + any secrets (chmod 600)
+│   ├── gmail_sync_state.json       # last sync result + processed message IDs
+│   ├── sync_runs.json              # recent automatic-run history
+│   └── unresolved_gmail_items.json # emails a sync couldn't act on
+├── backups/              # timestamped DB backups (gitignored)
+├── setup.command / setup.bat   # one-double-click first-run setup
+├── start.command / start.bat   # launch the server
+├── stop.command  / stop.bat    # stop the server
+├── run_tests.command           # python3 -m unittest discover tests
+├── start_hidden.vbs            # Windows: no-window wrapper around start.bat
+├── requirements.txt      # only for the "scheduled with your keys" sync path
+├── SETUP.md              # setup guide for a fresh AI assistant session
+├── GMAIL_SYNC.md         # the sync policy every method follows
+├── GMAIL_SYNC_TASK_PROMPT.md    # prompt the CLI method / a manual paste uses
+├── GMAIL_SYNC_SETUP.md   # reference for the two automatic sync options
 └── README.md
 ```
 
-The app logo lives at `frontend/assets/logo.png` so the running server can
-serve it (browser tab icon, top bar). If you replace the logo, update that
-file, then regenerate `assets/logo.ico` from it (see below).
+The app logo lives at `frontend/assets/logo.png` (browser tab icon, top
+bar). `setup.command` renders it into the macOS app icon; on Windows,
+`assets/logo.ico` is used for the shortcut.
 
-## Desktop shortcut
+## Desktop launcher
 
-**Windows:** a ready-made **`JobTrace.lnk`** shortcut is included in this
-folder — just drag or copy it onto your Desktop. It launches
-`start_hidden.vbs` (a tiny wrapper that runs `start.bat` with no window at
-all — not even a brief flash) and uses the app logo as its icon.
+`setup.command` / `setup.bat` create it for you and bake in this folder's
+path. **Move the project folder later → re-run setup** to refresh it.
 
-That shortcut points at this exact folder's current location, so **if you
-move or rename this folder after copying the shortcut out, the shortcut
-will stop working** — double-clicking it will do nothing or show an
-error. If that happens (or you deleted it and want it back), regenerate
-it by running this in PowerShell from the project folder:
+- **macOS:** `~/Desktop/JobTrace.app` (built locally, so it's never
+  Gatekeeper-quarantined). Drag it to the Dock. It runs with no visible
+  window.
+- **Windows:** `JobTrace.lnk` on the Desktop, pointing at `start_hidden.vbs`
+  (no console flash).
 
-```powershell
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("$([Environment]::GetFolderPath('Desktop'))\JobTrace.lnk")
-$Shortcut.TargetPath = "$PWD\start_hidden.vbs"
-$Shortcut.WorkingDirectory = "$PWD"
-$Shortcut.IconLocation = "$PWD\assets\logo.ico,0"
-$Shortcut.Save()
-```
-
-**macOS:** there's no equivalent hidden-window shortcut yet — drag
-`start.command` onto the Dock or the Desktop for one-click launching
-instead. Double-clicking it briefly opens a Terminal window while the
-server starts (the same non-hidden experience plain `start.bat` gives on
-Windows), then opens the dashboard in your browser.
+To recreate either by hand, just re-run `setup.*`.
 
 ## Requirements
 
@@ -143,10 +130,11 @@ Windows), then opens the dashboard in your browser.
 
 ## Installing dependencies
 
-There are none to install to run the app itself, or the manual/assistant-driven
-Gmail sync — `requirements.txt` only lists dependencies for the optional
-headless API Gmail sync (see [Gmail synchronization](#gmail-synchronization)).
-Just make sure Python is installed and on your PATH:
+None — for the app, the Tracker, the assistant-driven Gmail sync, and the
+CLI-driven scheduled sync. `requirements.txt` is only for the "scheduled
+with your keys" sync option (see
+[Gmail synchronization](#gmail-synchronization)), and even then the default
+IMAP path needs just `anthropic`. Just make sure Python is installed:
 
 ```bash
 python3 --version
@@ -287,68 +275,70 @@ the moment something is closed out.
 
 ## Gmail synchronization
 
-JobTrace itself still makes no network calls to Gmail or any AI API on its
-own — it only reads and writes its own local files
-(`data/gmail_sync_state.json`, `data/unresolved_gmail_items.json`, and the
-database). There are three ways to actually perform a sync, and you choose
-which fits you:
+**Off by default.** JobTrace makes no network calls on its own; a sync is a
+separate thing you turn on. Everything below is configured in the dashboard:
+the **Gmail pill (top-right) → Settings**, which shows a live readiness
+checklist. Full reference: **[GMAIL_SYNC_SETUP.md](GMAIL_SYNC_SETUP.md)**.
 
-| | **A. Manual assistant session** | **B. Assistant + scheduler** | **C. Headless API sync** |
+| | **Ask your assistant** | **Scheduled via CLI** | **Scheduled with your keys** |
 |---|---|---|---|
-| How it works | You ask Claude Code/Desktop/Codex to sync now; it reads Gmail via its own connector | Same as A, run automatically on a schedule | `backend/gmail_api_sync.py` calls the Gmail + Anthropic APIs directly with your own keys |
-| Needs an assistant app installed | Yes | Yes | **No** |
+| How it works | You say "sync my Gmail"; it reads Gmail via its own connector | The server runs `claude`/`codex` on a timer | The server runs the sync in-process |
+| Assistant app | Yes (its Gmail connector) | Yes (`claude`/`codex` CLI, signed in, Gmail connector added) | **No** |
 | Runs automatically | No | Yes | Yes |
-| Cost | Free | Free | Billed to your own Anthropic API key, per run |
-| Setup | None | Gmail connector authorized once | Google Cloud OAuth client + Anthropic API key (one-time) |
-| Set up via | `GMAIL_SYNC_TASK_PROMPT.md` | + Task Scheduler/`launchd` | [GMAIL_SYNC_API.md](GMAIL_SYNC_API.md) |
+| Cost | your plan | your plan | **your Anthropic API key**, per run |
+| Setup | none | CLI sign-in + a Gmail connector on the CLI | Anthropic key + Gmail (Google sign-in, or an app password) |
 
-All three follow the exact same rules and write into the exact same local
-files, so you can mix and match (e.g. use A day-to-day and only set up C
-later for unattended coverage) without anything breaking.
+All three follow the **same rules** and write the **same files**, so they
+mix freely.
 
-- **[GMAIL_SYNC.md](GMAIL_SYNC.md)** is the full, self-contained
-  instruction set both A/B (an assistant session) and C
-  (`gmail_api_sync.py`, which reads this file at runtime as its policy —
-  see [GMAIL_SYNC_API.md](GMAIL_SYNC_API.md)) follow to do this safely
-  (matching rules, status mapping, duplicate protection, unresolved-item
-  handling, and a "lessons from the first sync" section documenting real
-  mistakes worth not repeating — e.g. Gmail search excludes Trash by
-  default). Ask your assistant to "sync Gmail" or "check for job
-  application updates" and point it at that file if it doesn't already
-  know about it.
-- **[GMAIL_SYNC_TASK_PROMPT.md](GMAIL_SYNC_TASK_PROMPT.md)** is a
-  ready-to-use prompt for option A, and for turning it into option B later
-  — paste it as the task's instructions when you're ready to set that up,
-  or use it with **`run_gmail_sync_claude.bat`/`.sh`** or
-  **`run_gmail_sync_codex.bat`/`.sh`** plus Windows Task Scheduler or
-  macOS `launchd` (see `com.jobtrace.gmailsync.plist.example`). Nothing
-  runs automatically until you create the schedule yourself.
-- **[GMAIL_SYNC_API.md](GMAIL_SYNC_API.md)** covers option C end to end:
-  Google Cloud + Anthropic API key setup, the first interactive run, and
-  scheduling via `run_gmail_sync_api.bat`/`.sh`.
-- The top bar shows a **Gmail sync status pill** with the last sync time
-  and result; click it for the full breakdown and any unresolved items —
-  it can't tell which of the three options produced a given sync, since
-  they all write the same way.
-- Duplicate protection is enforced two ways: `data/gmail_sync_state.json`
-  tracks every Gmail message ID already processed, and
-  `application_events.gmail_message_id` is checked as a second,
-  database-level guard — running the same sync twice is safe and leaves
-  the tracker unchanged the second time.
-- **[JobTrace_System_Brief.pdf](JobTrace_System_Brief.pdf)** is an
-  optional plain-language walkthrough of how the whole system fits
-  together. It was written with Claude Code specifically in mind for the
-  automation section — if you're using Codex instead, the concepts carry
-  over directly, just substitute "Codex CLI" wherever it says "Claude
-  Code."
+- **[GMAIL_SYNC.md](GMAIL_SYNC.md)** is the self-contained policy every
+  method follows (matching tiers, status mapping, duplicate protection, and
+  a "lessons from the first sync" section — e.g. Gmail search excludes Trash
+  by default). The keys-based agent reads it at runtime, so there's one copy
+  of the rules. Ask your assistant to "sync Gmail" and point it here.
+- **Automatic sync runs in the server process** — no launchd, no Task
+  Scheduler. It only runs while JobTrace is open, so add the launcher to
+  your login items for unattended coverage.
+- **"Scheduled with your keys"** takes Gmail either way: **Google sign-in**
+  (OAuth, `gmail.readonly` scope, revocable — recommended, but needs a
+  one-time Google Cloud OAuth client) or a **Gmail app password** (no Cloud
+  console, but can't be scoped read-only — a trade-off the Settings panel
+  spells out).
+- The **Gmail pill** shows the last sync, the last automatic run's result
+  (and its error, if any), and unresolved items. It can't tell which method
+  produced a given sync — they all write the same way.
+- **Duplicate protection** is enforced twice: `data/gmail_sync_state.json`
+  tracks every processed Gmail message ID, and
+  `application_events.gmail_message_id` is a second, database-level guard.
+  Running the same sync twice leaves the tracker unchanged.
+- **[JobTrace_System_Brief.pdf](JobTrace_System_Brief.pdf)** is a
+  plain-language walkthrough of how the pieces fit together.
 
-## Future automation
+## Development
 
-The architecture is intentionally shaped so a **separate** future script
-(e.g. a scheduled Gmail-polling worker, once that phase is built) can plug
-in later without touching the frontend or the HTTP layer at all. It would
-import `backend/repository.py` directly and call the same functions the UI
-and the Gmail sync workflow above both use:
+```
+backend/          core: server.py (routing) -> repository.py (business logic)
+                  -> validation.py -> database.py (schema + connection)
+backend/sync/      Gmail sync: state, config, doctor, scheduler, agent, imap
+frontend/js/       one module per view; no build step, no framework
+tests/             stdlib unittest, no dependencies
+```
+
+Run the suite (nothing to install):
+
+```bash
+python3 -m unittest discover tests        # or: ./run_tests.command
+```
+
+Schema changes are additive only — add a column with `_add_column()` in
+`backend/database.py::_migrate_schema`; it backs the database up first and is
+safe to run repeatedly.
+
+## Extending it
+
+Everything goes through `backend/repository.py` — a standalone script (or
+another sync transport) imports it directly, no HTTP server needed, and
+gets the same validation, transactions, and auto-generated timeline events:
 
 ```python
 from backend import repository as repo
@@ -368,10 +358,10 @@ repo.update_application_stage(
 )
 ```
 
-This works today, from any standalone Python script, with no server running
-— `repository.database.new_connection()` opens the same `data/applications.db`
-file directly. When Gmail/AI phases are built, they'll likely add a few new
-tables (e.g. `recruiters`, `recruitment_emails`, `ai_classifications`,
-`assessments`) that reference `applications.id`, following the same pattern
-as `application_events`. Nothing in the current schema needs to change for
-that — it was designed with those tables in mind from the start.
+`backend.database.new_connection()` opens an independent connection to the
+same `data/applications.db` for scripts that live outside the server's
+request-per-thread lifecycle. The schema is additive: `_migrate_schema()` in
+`backend/database.py` adds columns idempotently on startup (that's how the
+Tracker's `scheduled_for` / `item_status` and the Gmail `gmail_message_id`
+columns arrived), and new tables that reference `applications.id` follow the
+same `ON DELETE CASCADE` pattern as `application_events`.

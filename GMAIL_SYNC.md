@@ -15,10 +15,11 @@ application updates," read this whole document before touching anything.
   read Gmail through your own Gmail connector/MCP tool, reason about what
   each email means, and write the result directly into JobTrace's local
   files using the tools described below.
-- This is currently a **manual, on-demand process**. A ready-to-use prompt
-  for a recurring scheduled task exists at `GMAIL_SYNC_TASK_PROMPT.md`, but
-  actually scheduling it is a separate step the user does deliberately —
-  don't assume a recurring task is active just because the prompt exists.
+- These are the rules for **one sync run**. They're identical whether the
+  run is you (asked directly), the scheduler shelling out to a CLI with
+  `GMAIL_SYNC_TASK_PROMPT.md`, or `backend/sync/agent.py` (which reads
+  this file as its system prompt). Automatic runs only happen if the user
+  turned them on in the dashboard — don't assume one is active.
 - Gmail access is **read-only**. Never send, draft, forward, delete,
   archive, label, unlabel, mark read/unread, or otherwise modify anything
   in Gmail. Only search and read.
@@ -130,7 +131,7 @@ about to run this, read these first:
     re-flagging something as unresolved, check whether a matching
     application already exists (by company, and position if now
     knowable); if so, remove the stale entry with
-    `gmail_sync.remove_unresolved_item` instead of leaving a duplicate
+    `sync_state.remove_unresolved_item` instead of leaving a duplicate
     signal sitting there.
 
 If the user files recruitment emails under a specific Gmail label (many
@@ -152,8 +153,8 @@ straight to the broader keyword sweep (Pass B in the task prompt).
 ## Files you may modify
 
 - `data/applications.db` — only through `backend/repository.py` functions (see below), never by editing the file directly or writing raw SQL from a separate connection while the app might be running.
-- `data/gmail_sync_state.json` — through `backend/gmail_sync.py` functions.
-- `data/unresolved_gmail_items.json` — through `backend/gmail_sync.py` functions.
+- `data/gmail_sync_state.json` — through `backend/sync/state.py` functions.
+- `data/unresolved_gmail_items.json` — through `backend/sync/state.py` functions.
 
 **Never modify:** `backend/*.py` source files, `frontend/*`, `data/applications.db`'s schema, or anything outside the two JSON files and the applications/events rows themselves. If you think a schema or code change is genuinely needed, stop and ask the user — don't improvise it mid-sync.
 
@@ -167,13 +168,13 @@ transactions, and the auto-generated timeline events for you:
 import sys
 sys.path.insert(0, r"<PATH_TO_THIS_PROJECT_FOLDER>")  # e.g. the folder this file is in — use its absolute path
 from backend import repository as repo
-from backend import gmail_sync
+from backend.sync import state as sync_state
 
 # Load sync state FIRST, always.
-state = gmail_sync.load_sync_state()
+state = sync_state.load_sync_state()
 
 # --- Duplicate check (see "Duplicate protection" below) ---
-if gmail_sync.is_message_processed(state, message_id):
+if sync_state.is_message_processed(state, message_id):
     ...  # skip this message entirely, do not re-derive anything from it
 
 # --- Finding an existing application ---
@@ -217,14 +218,15 @@ repo.add_event(
 
 # --- Mark the message processed and save state (do this for EVERY message you touch,
 #     including ones you decide to ignore) ---
-gmail_sync.mark_message_processed(state, message_id)
-gmail_sync.save_sync_state(state)
+sync_state.mark_message_processed(state, message_id)
+sync_state.save_sync_state(state)
 ```
 
 At the very end of the whole sync run, also call:
 
 ```python
-gmail_sync.record_sync_result(state, {
+sync_state.set_connected_account(state, "<the Gmail address you read from>")
+sync_state.record_sync_result(state, {
     "emailsReviewed": ...,
     "recruitmentRelated": ...,
     "applicationsCreated": ...,
@@ -235,25 +237,28 @@ gmail_sync.record_sync_result(state, {
     "offersDetected": ...,
     "emailsIgnored": ...,
 })
-gmail_sync.save_sync_state(state)
+sync_state.save_sync_state(state)
 ```
 
 This stamps `lastSuccessfulSync` and is what the dashboard's Gmail pill
-reads. Only call it once, after the whole batch is done — not per email.
+reads. `set_connected_account` records which inbox you actually read (find
+your own address from a `label:sent` message's `From:` header) so the user
+can spot a sync that ran against the wrong account. Only call these once,
+after the whole batch is done — not per email.
 
 ## Duplicate protection (critical)
 
 Before using a Gmail message to create an application, change a stage or
 outcome, or create an event:
 
-1. Check `gmail_sync.is_message_processed(state, message_id)`. If `True`,
+1. Check `sync_state.is_message_processed(state, message_id)`. If `True`,
    **skip this message entirely** — do not re-derive anything from it,
    even if you think the result would be the same.
 2. `backend/repository.py::has_processed_gmail_message(message_id)` is a
    second, database-level check (has any event already been stamped with
    this message ID). Treat a `True` result the same way — skip.
 3. After successfully acting on a message (or deciding to ignore it),
-   call `gmail_sync.mark_message_processed(state, message_id)` and save
+   call `sync_state.mark_message_processed(state, message_id)` and save
    state before moving to the next message. Don't batch this at the end —
    if the sync is interrupted partway through, already-processed messages
    must not be reprocessed on the next run.
@@ -400,8 +405,8 @@ applications):
 When you can't confidently match or classify something, call:
 
 ```python
-unresolved = gmail_sync.load_unresolved()
-gmail_sync.add_unresolved_item(unresolved, {
+unresolved = sync_state.load_unresolved()
+sync_state.add_unresolved_item(unresolved, {
     "gmailMessageId": message_id,
     "emailDate": "2026-08-24",
     "sender": "recruiting@example.com",
@@ -412,7 +417,7 @@ gmail_sync.add_unresolved_item(unresolved, {
     "reason": "Two existing applications at Example Corp; email doesn't specify which role.",
     "candidateApplicationIds": [12, 15],
 })
-gmail_sync.save_unresolved(unresolved)
+sync_state.save_unresolved(unresolved)
 ```
 
 Don't store the full email body — a subject, sender, dates, and your
@@ -455,7 +460,7 @@ context.
    `search_threads`. Prefer recent messages over the entire mailbox
    unless explicitly asked to backfill further.
 4. For each thread/message, in order:
-   a. Skip if `gmail_sync.is_message_processed` is already `True`.
+   a. Skip if `sync_state.is_message_processed` is already `True`.
    b. Read the full message (`get_thread` / `get_message`, `PLAIN_TEXT`
       format to save context).
    c. Classify it (see table above).
@@ -468,7 +473,7 @@ context.
       location, job_url, or source, try to enrich it via web search (see
       "Enriching location, job URL, and source via web search" above).
    h. Mark the message processed and save state immediately.
-5. After the loop, call `gmail_sync.record_sync_result(...)` and save
+5. After the loop, call `sync_state.record_sync_result(...)` and save
    state once more.
 6. Report a summary to the user (see the sync report format used in the
    original setup conversation, or just: reviewed / recruitment-related /
@@ -477,6 +482,6 @@ context.
 7. Suggest the user open the dashboard to review the Gmail sync pill (top
    right) and the "Unresolved items" list if any exist.
 
-Do not schedule anything, do not create a recurring task, and do not
-build a Gmail API integration — this document only describes the manual
-workflow for an assistant session invoked directly by the user.
+This document is the sync *policy*, not a setup task. If the user wants
+automatic sync, don't build your own scheduler or cron job — point them at
+the dashboard's Gmail sync settings (see SETUP.md), which already does it.
