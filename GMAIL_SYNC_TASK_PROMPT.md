@@ -214,9 +214,9 @@ Then report:
 Then list the applications that changed, in a compact format such as:
 
 ```
-KLM — Management Trainee → Assessment
-Deloitte — Business Analyst → Rejected
-JDE Peet's — Graduate Programme → New application detected
+Acme Corp — Software Engineer → Assessment
+Globex — Business Analyst → Rejected
+Initech — Graduate Programme → New application detected
 ```
 
 Finally, list any unresolved items that need my attention. Do not show me or reproduce private email content unless it's necessary to explain an unresolved classification.

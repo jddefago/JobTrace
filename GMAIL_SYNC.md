@@ -178,17 +178,17 @@ if sync_state.is_message_processed(state, message_id):
     ...  # skip this message entirely, do not re-derive anything from it
 
 # --- Finding an existing application ---
-app = repo.find_matching_application(company="KLM", position="Management Trainee")
+app = repo.find_matching_application(company="Acme Corp", position="Software Engineer")
 # Returns the most recent exact (case-insensitive) company+position match, or None.
 # For fuzzier matching (tiers 4-7 below), use:
-candidates = repo.list_applications(company="KLM")  # partial company match, summary rows only
+candidates = repo.list_applications(company="Acme Corp")  # partial company match, summary rows only
 # then use get_application(id) on plausible candidates to inspect details/events yourself.
 
 # --- Creating a new application (only for clear confirmation emails) ---
 new_app = repo.create_application(
     {
-        "company": "KLM",
-        "position": "Management Trainee",
+        "company": "Acme Corp",
+        "position": "Software Engineer",
         "location": "",              # blank if unknown, never invent one
         "application_date": "2026-08-20",  # confirmation email date unless a more accurate date is stated
         "source": "Unknown",         # only infer if reasonably clear from the email

@@ -11,7 +11,7 @@ Example of the kind of call a future script will make:
 
     from backend import repository as repo
 
-    app = repo.find_matching_application(company="KLM", position="Management Trainee")
+    app = repo.find_matching_application(company="Acme Corp", position="Software Engineer")
     if app:
         repo.add_event(app["id"], event_type="Assessment Invitation", event_date="2026-08-24")
         repo.update_application_stage(app["id"], stage="Assessment", outcome="Positive")

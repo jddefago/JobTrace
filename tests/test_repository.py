@@ -8,8 +8,8 @@ from tests.helpers import TempDBTestCase
 
 class ApplicationCRUD(TempDBTestCase):
     def test_create_seeds_submitted_event_and_max_stage(self):
-        app = self.make_application(company="KLM", position="Trainee")
-        self.assertEqual("KLM", app["company"])
+        app = self.make_application(company="Acme Corp", position="Engineer")
+        self.assertEqual("Acme Corp", app["company"])
         self.assertEqual("Applied", app["current_stage"])
         self.assertEqual("Applied", app["max_stage_reached"])
         self.assertEqual(["Application Submitted"], [e["event_type"] for e in app["events"]])
@@ -152,14 +152,14 @@ class CsvRoundTrip(TempDBTestCase):
         csv_text = (
             "company,position,location,application_date,source,job_url,"
             "job_description,stage,outcome,notes\n"
-            "KLM,Trainee,Amsterdam,2026-01-05,LinkedIn,,,Applied,Pending,hi\n"
+            "Acme Corp,Engineer,Amsterdam,2026-01-05,LinkedIn,,,Applied,Pending,hi\n"
         )
         rows, errors = repo.parse_and_validate_csv_import(csv_text)
         self.assertEqual([], errors)
         ids = repo.import_applications(rows)
         self.assertEqual(1, len(ids))
         out = repo.export_all_csv()
-        self.assertIn("KLM", out)
+        self.assertIn("Acme Corp", out)
 
     def test_import_reports_bad_rows_and_inserts_nothing(self):
         bad = ("company,position,application_date\n"

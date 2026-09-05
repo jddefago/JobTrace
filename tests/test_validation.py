@@ -11,7 +11,7 @@ class TextRules(unittest.TestCase):
             v.require_text("  ", "company")
 
     def test_required_text_trims(self):
-        self.assertEqual("KLM", v.require_text("  KLM ", "company"))
+        self.assertEqual("Acme Corp", v.require_text("  Acme Corp ", "company"))
 
     def test_length_cap(self):
         with self.assertRaises(v.ValidationError):
