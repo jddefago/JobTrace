@@ -72,10 +72,10 @@
 
   .doc { max-width: 47rem; margin: 0 auto; padding: 3.5rem 2rem 5rem; }
 
-  /* ---------- cover (matches the light body palette) ---------- */
+  /* ---------- cover (a dark page, deliberately — the app itself is dark) ---------- */
   .cover {
-    --c-bg: var(--paper); --c-ink: var(--ink); --c-soft: var(--ink-soft);
-    --c-faint: var(--ink-faint); --c-brass: var(--brass); --c-rule: var(--rule-strong);
+    --c-bg: #14110b; --c-ink: #f1ece1; --c-soft: #a99d86;
+    --c-faint: #706654; --c-brass: #dca647; --c-rule: #2f2b20;
     position: relative; isolation: isolate;
     background: var(--c-bg); color: var(--c-ink);
     height: 92vh; margin: -3.5rem -2rem 3rem; padding: 3.2rem 2rem 2.4rem;
@@ -91,7 +91,7 @@
   .cover-head { display: flex; flex-direction: row; align-items: flex-start; gap: 2.2rem; margin-top: 9vh; }
   .cover-logo {
     flex: none; width: 148px; height: auto; border-radius: 27px; display: block;
-    box-shadow: 0 0 0 1px rgba(138, 92, 23, 0.16), 0 14px 34px rgba(35, 32, 26, 0.16);
+    box-shadow: 0 0 0 1px rgba(220, 166, 71, 0.22), 0 14px 40px rgba(0, 0, 0, 0.5);
   }
   .cover-head-text { display: flex; flex-direction: column; align-items: flex-start; padding-top: 0.5rem; }
   .cover-kicker {
