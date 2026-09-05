@@ -93,7 +93,6 @@ JobTrace/
 ├── start_hidden.vbs            # Windows: no-window wrapper around start.bat
 ├── requirements.txt      # only for the "scheduled with your keys" sync path
 ├── SYSTEM_BRIEF.pdf      # plain-language walkthrough for a non-technical reader
-├── SYSTEM_BRIEF.source.html  # source for the brief — see its header comment to regenerate
 ├── SETUP.md              # setup guide for a fresh AI assistant session
 ├── GMAIL_SYNC.md         # the sync policy every method follows
 ├── GMAIL_SYNC_TASK_PROMPT.md    # prompt the CLI method / a manual paste uses
