@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>JobTrace</title>
 <link rel="icon" type="image/png" href="/assets/logo.png" />
+<script>
+  /* Applied before the stylesheet loads so a light-mode choice never
+     flashes dark first. Dark is the default -- only an explicit saved
+     "light" switches this. */
+  try {
+    if (localStorage.getItem("jobtrace-theme") === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  } catch (e) {}
+</script>
 <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -26,6 +36,8 @@
   </nav>
 
   <div class="topbar-right">
+    <button class="icon-btn action-icon-btn" id="theme-toggle-btn" type="button" title="Switch to light mode" aria-label="Switch to light mode"></button>
+
     <button class="btn-update" id="update-dashboard-btn" type="button" title="Sync Gmail and refresh the dashboard">
       <span class="icon-glyph" id="update-dashboard-icon"></span>
       <span>Update</span>

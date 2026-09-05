@@ -12,6 +12,10 @@
   --panel-sunken: #0e1119;
   --line: #242a3a;
   --line-soft: #1b202c;
+  --line-hover: #333a4d;
+
+  --scrollbar-thumb: #2c3242;
+  --scrollbar-thumb-hover: #3a4256;
 
   --text-hi: #eceef4;
   --text-mid: #8b93a8;
@@ -70,6 +74,8 @@
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.36);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
 
+  --topbar-bg: rgba(18, 21, 29, 0.88);
+
   --radius-sm: 6px;
   --radius-md: 9px;
   --radius-lg: 13px;
@@ -79,6 +85,43 @@
 }
 
 :root { color-scheme: dark; }
+
+/* ---------- light mode ----------
+   An explicit, remembered choice (see the inline script in index.html's
+   <head> and Theme.init() in app.js) -- dark stays the default. Status
+   colors (positive/negative/interview/info/pending/brass's *-soft tints)
+   are left as-is: they're always paired with their own tinted background,
+   so the contrast that works in dark mode carries over unchanged. Brass
+   itself is the one exception -- it also sits directly on the page as
+   plain link/active-tab text, so it's deepened here for contrast against
+   a light surface. */
+:root[data-theme="light"] {
+  --ink: #f6f3ec;
+  --panel: #ffffff;
+  --panel-raised: #faf7f0;
+  --panel-sunken: #f0ece1;
+  --line: #e6e0d1;
+  --line-soft: #efe9db;
+  --line-hover: #d2c9b3;
+
+  --scrollbar-thumb: #dcd4bf;
+  --scrollbar-thumb-hover: #c7bca0;
+
+  --text-hi: #201c13;
+  --text-mid: #6b6455;
+  --text-low: #948c77;
+
+  --brass: #a3701f;
+  --brass-hover: #86591a;
+  --brass-soft: rgba(163, 112, 31, 0.12);
+  --brass-line: rgba(163, 112, 31, 0.38);
+
+  --topbar-bg: rgba(255, 253, 249, 0.88);
+
+  --shadow-lg: 0 16px 40px rgba(40, 32, 16, 0.16);
+
+  color-scheme: light;
+}
 
 * { box-sizing: border-box; }
 
@@ -122,11 +165,11 @@ a { color: var(--brass); }
 }
 
 /* Dark-aware scrollbars */
-* { scrollbar-color: #333a4d var(--panel); scrollbar-width: thin; }
+* { scrollbar-color: var(--line-hover) var(--panel); scrollbar-width: thin; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2c3242; border-radius: 8px; border: 2px solid var(--panel); }
-::-webkit-scrollbar-thumb:hover { background: #3a4256; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 8px; border: 2px solid var(--panel); }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 
 /* ============================================================
    Topbar
@@ -137,7 +180,7 @@ a { color: var(--brass); }
   align-items: center;
   padding: 0 24px;
   height: 72px;
-  background: rgba(18, 21, 29, 0.88);
+  background: var(--topbar-bg);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
   position: sticky;
@@ -217,7 +260,7 @@ a { color: var(--brass); }
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
-.gmail-status-pill:hover { background: var(--panel-raised); color: var(--text-hi); border-color: #333a4d; }
+.gmail-status-pill:hover { background: var(--panel-raised); color: var(--text-hi); border-color: var(--line-hover); }
 .gmail-status-icon { display: flex; flex-shrink: 0; color: var(--text-low); }
 .gmail-status-icon svg { width: 18px; height: 18px; }
 .gmail-status-pill::after {
@@ -257,7 +300,7 @@ a { color: var(--brass); }
 .btn-primary:hover:not(:disabled) { background: var(--brass-hover); }
 
 .btn-ghost { background: transparent; color: var(--text-mid); border-color: var(--line); }
-.btn-ghost:hover:not(:disabled) { background: var(--panel-raised); color: var(--text-hi); border-color: #333a4d; }
+.btn-ghost:hover:not(:disabled) { background: var(--panel-raised); color: var(--text-hi); border-color: var(--line-hover); }
 
 .btn-danger { background: transparent; color: var(--negative); border-color: var(--negative-border); }
 .btn-danger:hover:not(:disabled) { background: var(--negative-bg); }
@@ -289,7 +332,7 @@ a { color: var(--brass); }
   background: var(--panel-sunken);
   color: var(--text-mid);
 }
-.action-icon-btn:hover { background: var(--panel-raised); color: var(--text-hi); border-color: #333a4d; }
+.action-icon-btn:hover { background: var(--panel-raised); color: var(--text-hi); border-color: var(--line-hover); }
 .action-icon-btn svg { width: 18px; height: 18px; display: block; }
 
 .action-icon-primary {
@@ -662,7 +705,7 @@ a { color: var(--brass); }
 .sync-h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-mid); margin: 0; }
 .sync-method-radios { display: flex; flex-direction: column; gap: 6px; }
 .sync-method-option { display: flex; gap: 10px; align-items: flex-start; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
-.sync-method-option:hover { border-color: #333a4d; }
+.sync-method-option:hover { border-color: var(--line-hover); }
 .sync-method-option input { margin-top: 2px; }
 .sync-method-name { font-size: 13px; color: var(--text-hi); font-weight: 600; }
 .sync-method-hint { font-size: 11.5px; color: var(--text-low); margin-top: 1px; }

@@ -67,6 +67,33 @@ function bindUpdateButton() {
   document.getElementById("update-dashboard-btn").addEventListener("click", runDashboardUpdate);
 }
 
+/* Dark is the default; light is an explicit, remembered per-browser choice
+   (see the inline script in <head> that applies it before first paint). */
+function applyTheme(theme) {
+  const btn = document.getElementById("theme-toggle-btn");
+  if (theme === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+    btn.innerHTML = Icons.sun;
+    btn.title = btn.ariaLabel = "Switch to dark mode";
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+    btn.innerHTML = Icons.moon;
+    btn.title = btn.ariaLabel = "Switch to light mode";
+  }
+}
+
+function bindThemeToggle() {
+  const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  applyTheme(current);
+  document.getElementById("theme-toggle-btn").addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+    try {
+      localStorage.setItem("jobtrace-theme", next);
+    } catch (e) {}
+    applyTheme(next);
+  });
+}
+
 async function bootstrap() {
   try {
     State.meta = await Api.getMeta();
@@ -76,6 +103,7 @@ async function bootstrap() {
   }
 
   bindTabs();
+  bindThemeToggle();
   bindUpdateButton();
   AppForm.init();
   Detail.init();
