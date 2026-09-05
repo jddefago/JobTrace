@@ -25,6 +25,11 @@
   --brass-hover: #e6b657;
   --brass-soft: rgba(217, 164, 65, 0.14);
   --brass-line: rgba(217, 164, 65, 0.4);
+  /* a dimmed brass for "reached but not the current step" marks (stage
+     rail ticks) -- its own token rather than opacity, because the alpha
+     that reads as a soft glow on a dark panel just fades into a light
+     one; light mode needs a stronger mix to stay visible at all */
+  --brass-muted: rgba(217, 164, 65, 0.38);
 
   /* kept as --brand / --brand-hover / --brand-light for backward
      compatibility with chart code that references the brand accent */
@@ -100,21 +105,22 @@
   --panel: #ffffff;
   --panel-raised: #faf7f0;
   --panel-sunken: #f0ece1;
-  --line: #e6e0d1;
-  --line-soft: #efe9db;
-  --line-hover: #d2c9b3;
+  --line: #ddd4bf;
+  --line-soft: #e9e2d0;
+  --line-hover: #c9bfa5;
 
   --scrollbar-thumb: #dcd4bf;
   --scrollbar-thumb-hover: #c7bca0;
 
   --text-hi: #201c13;
   --text-mid: #6b6455;
-  --text-low: #948c77;
+  --text-low: #857c68;
 
   --brass: #a3701f;
   --brass-hover: #86591a;
   --brass-soft: rgba(163, 112, 31, 0.12);
   --brass-line: rgba(163, 112, 31, 0.38);
+  --brass-muted: rgba(163, 112, 31, 0.55);
 
   --topbar-bg: rgba(255, 253, 249, 0.88);
 
@@ -570,9 +576,9 @@ a { color: var(--brass); }
   border-radius: 2px;
   background: var(--line);
 }
-.stage-rail-tick.filled { background: var(--brass); opacity: 0.38; }
-.stage-rail-tick.filled.current { opacity: 1; }
-.stage-rail-tick.filled.offer { opacity: 1; box-shadow: 0 0 6px var(--brass-line); }
+.stage-rail-tick.filled { background: var(--brass-muted); }
+.stage-rail-tick.filled.current { background: var(--brass); }
+.stage-rail-tick.filled.offer { background: var(--brass); box-shadow: 0 0 6px var(--brass-line); }
 
 .stage-rail-tick.capped-negative { background: var(--negative); opacity: 1; }
 .stage-rail-tick.capped-positive { background: var(--positive); opacity: 1; }
