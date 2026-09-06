@@ -38,16 +38,16 @@
   <div class="topbar-right">
     <button class="icon-btn action-icon-btn" id="theme-toggle-btn" type="button" title="Switch to light mode" aria-label="Switch to light mode"></button>
 
-    <button class="btn-update" id="update-dashboard-btn" type="button" title="Sync Gmail and refresh the dashboard">
+    <button class="btn-update" id="update-dashboard-btn" type="button" title="Check email and refresh the dashboard">
       <span class="icon-glyph" id="update-dashboard-icon"></span>
       <span>Update</span>
     </button>
 
     <div class="gmail-controls">
-      <button class="gmail-status-pill" id="gmail-status-btn" type="button" title="Gmail not synced yet">
+      <button class="gmail-status-pill" id="gmail-status-btn" type="button" title="Email not checked yet">
         <span class="gmail-status-icon" id="gmail-status-icon"></span>
       </button>
-      <button class="icon-btn action-icon-btn gmail-settings-btn" id="gmail-settings-btn" type="button" title="Gmail sync settings" aria-label="Gmail sync settings"></button>
+      <button class="icon-btn action-icon-btn gmail-settings-btn" id="gmail-settings-btn" type="button" title="Email settings" aria-label="Email settings"></button>
     </div>
 
     <div class="dropdown" id="export-dropdown">
@@ -427,16 +427,47 @@
   </div>
 </div>
 
-<!-- GMAIL SYNC STATUS MODAL -->
+<!-- EMAIL STATUS MODAL -->
 <div class="overlay" id="gmail-sync-overlay" hidden>
   <div class="modal-box modal-box-lg">
     <div class="modal-header">
-      <h3>Gmail synchronization</h3>
+      <h3>Email status</h3>
       <button class="icon-btn" id="gmail-sync-close">✕</button>
     </div>
     <div class="modal-body" id="gmail-sync-body"></div>
     <div class="modal-footer">
       <button type="button" class="btn btn-primary" id="gmail-sync-ok">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PICK AN APPLICATION (attach an unresolved email to an existing one) -->
+<div class="overlay center" id="app-picker-overlay" hidden>
+  <div class="modal-box modal-box-lg">
+    <div class="modal-header">
+      <h3>Attach to an application</h3>
+      <button class="icon-btn" id="app-picker-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="text" id="app-picker-search" class="app-picker-search" placeholder="Search company or position…" autocomplete="off" />
+      <div id="app-picker-list" class="app-picker-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- READ-THE-EMAIL MODAL (an unresolved item's full body) -->
+<div class="overlay" id="email-view-overlay" hidden>
+  <div class="modal-box modal-box-lg">
+    <div class="modal-header">
+      <h3 id="email-view-title">Email</h3>
+      <button class="icon-btn" id="email-view-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="email-view-meta" id="email-view-meta"></div>
+      <div class="email-view-body" id="email-view-body"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-primary" id="email-view-ok">Close</button>
     </div>
   </div>
 </div>

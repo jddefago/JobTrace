@@ -71,6 +71,7 @@ const Api = (() => {
 
     getGmailSyncStatus: () => request("GET", "/api/gmail/sync-status"),
     getGmailUnresolved: () => request("GET", "/api/gmail/unresolved"),
+    deleteUnresolved: (id) => request("DELETE", `/api/gmail/unresolved/${id}`),
 
     getSyncConfig: () => request("GET", "/api/sync/config"),
     updateSyncConfig: (patch) => request("PUT", "/api/sync/config", patch),

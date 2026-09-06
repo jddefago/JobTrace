@@ -27,8 +27,8 @@ import email
 import email.policy
 import json
 import os
-import re
 import sys
+import time
 
 # Runnable as a script (python3 backend/sync/agent.py) -- put the project
 # root on sys.path so `backend` imports resolve.
@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from backend import database, repository as repo
 from backend.sync import config as sync_config, state as sync_state
+from backend.sync._gmail_text import extract_body_text as _extract_body_text
 
 
 class SyncConfigError(Exception):
@@ -65,7 +66,13 @@ GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 # the "model" field in the dashboard's Sync settings.
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TURNS = 60
-MAX_BODY_CHARS = 20000
+
+# Per-request timeout for the Anthropic API, and an overall wall-clock cap on
+# the whole agent loop. Without these a hung request would pin the scheduler's
+# "running" flag forever, blocking every future sync (the CLI path already has
+# its own subprocess timeout).
+API_TIMEOUT_SECONDS = 120.0
+RUN_DEADLINE_SECONDS = 1500
 
 WRITE_TOOLS = {
     "create_application",
@@ -165,17 +172,6 @@ def gmail_search_messages(service, query, include_trash=True, max_results=300):
         if not page_token or len(ids) >= max_results:
             break
     return ids[:max_results]
-
-
-def _extract_body_text(msg):
-    body_part = msg.get_body(preferencelist=("plain", "html"))
-    if body_part is None:
-        return ""
-    content = body_part.get_content()
-    if body_part.get_content_type() == "text/html":
-        content = re.sub(r"<[^>]+>", " ", content)
-        content = re.sub(r"\s+", " ", content).strip()
-    return content[:MAX_BODY_CHARS]
 
 
 def gmail_get_message(service, message_id):
@@ -475,6 +471,9 @@ class SyncSession:
         self.unresolved = sync_state.load_unresolved()
         self.done = False
         self.report = None
+        # message_id -> fetched message dict, so add_unresolved_item can attach
+        # the real body without the model having to (or being able to) retype it.
+        self._message_cache = {}
 
     def _save_state(self):
         if not self.dry_run:
@@ -506,7 +505,10 @@ class SyncSession:
         return {"labels": self.fetcher.list_labels()}
 
     def _tool_get_gmail_message(self, args):
-        return self.fetcher.get_message(args["message_id"])
+        msg = self.fetcher.get_message(args["message_id"])
+        if isinstance(msg, dict) and msg.get("id"):
+            self._message_cache[msg["id"]] = msg
+        return msg
 
     # -- Duplicate protection -------------------------------------------
 
@@ -587,16 +589,18 @@ class SyncSession:
     # -- Unresolved queue ---------------------------------------------------
 
     def _tool_add_unresolved_item(self, args):
+        cached = self._message_cache.get(args["gmail_message_id"], {})
         row = sync_state.add_unresolved_item(self.unresolved, {
             "gmailMessageId": args["gmail_message_id"],
             "emailDate": args.get("email_date"),
-            "sender": args.get("sender"),
-            "subject": args.get("subject"),
+            "sender": args.get("sender") or cached.get("from"),
+            "subject": args.get("subject") or cached.get("subject"),
             "possibleCompany": args.get("possible_company"),
             "possiblePosition": args.get("possible_position"),
             "possibleEventType": args.get("possible_event_type"),
             "reason": args["reason"],
             "candidateApplicationIds": args.get("candidate_application_ids", []),
+            "body": cached.get("body"),
         })
         self._save_unresolved()
         return row
@@ -700,7 +704,10 @@ def _run_sync_with_fetcher(config, fetcher, dry_run, log):
     import anthropic
 
     session = SyncSession(fetcher, dry_run=dry_run)
-    client = anthropic.Anthropic(api_key=config["anthropic_api_key"])
+    client = anthropic.Anthropic(
+        api_key=config["anthropic_api_key"], timeout=API_TIMEOUT_SECONDS
+    )
+    deadline = time.monotonic() + RUN_DEADLINE_SECONDS
 
     # Record which mailbox this run reads, so the dashboard can show it.
     try:
@@ -726,6 +733,10 @@ def _run_sync_with_fetcher(config, fetcher, dry_run, log):
     messages = [{"role": "user", "content": user_prompt}]
 
     for turn in range(1, MAX_TURNS + 1):
+        if time.monotonic() > deadline:
+            log(f"Hit the {RUN_DEADLINE_SECONDS // 60}-minute run deadline without "
+                "record_sync_result being called.")
+            break
         try:
             response = client.messages.create(
                 model=config["model"],
@@ -811,6 +822,9 @@ def run_job(config=None, dry_run=False, log=None):
             result["ok"] = True
             _log("Gmail Sync Complete")
             _log(json.dumps(session.report.get("result", {}), indent=2))
+            if session.report.get("summary"):
+                _log("")
+                _log(session.report["summary"])
         else:
             result["error"] = "The sync ended without recording a result."
     except SyncConfigError as e:
@@ -834,6 +848,16 @@ def run_job(config=None, dry_run=False, log=None):
 # ---------------------------------------------------------------------------
 
 def main():
+    # On Windows, a plain console encodes print() output with the legacy
+    # system codepage (e.g. cp1252), which can't represent characters like
+    # "->"'s Unicode cousin U+2192 that show up in Claude-written summaries.
+    # Force UTF-8 so those never crash the run.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser(description="Headless Gmail -> JobTrace sync via the Anthropic + Gmail APIs.")
     parser.add_argument("--dry-run", action="store_true", help="Log intended actions without writing anything.")
     parser.add_argument("--lookback-days", type=int, help="Override the config's lookback_days.")
@@ -849,38 +873,11 @@ def main():
     if args.label:
         config["gmail_label"] = args.label
 
-    os.makedirs(SYNC_LOG_DIR, exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join(SYNC_LOG_DIR, f"sync_api_{timestamp}.log")
-
-    lines = []
-
-    def log(msg):
-        print(msg)
-        lines.append(msg)
-
-    log(f"===== Gmail API sync run started {datetime.datetime.now().isoformat(timespec='seconds')} =====")
-    if args.dry_run:
-        log("Running in --dry-run mode: no data will be written.")
-
-    try:
-        session = run_sync(config, dry_run=args.dry_run, log=log)
-        if session.report:
-            log("")
-            log("Gmail Sync Complete")
-            log(json.dumps(session.report["result"], indent=2))
-            if session.report["summary"]:
-                log("")
-                log(session.report["summary"])
-    except SystemExit:
-        raise
-    except Exception as e:
-        log(f"Sync run failed: {type(e).__name__}: {e}")
-        raise
-    finally:
-        log(f"===== Gmail API sync run finished {datetime.datetime.now().isoformat(timespec='seconds')} =====")
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+    # run_job owns the log file, the log framing, and error handling; the CLI
+    # just streams the same lines to the console and sets an exit code.
+    result = run_job(config=config, dry_run=args.dry_run, log=print)
+    print(f"\nLog written to {result['log_path']}")
+    raise SystemExit(0 if result["ok"] else 1)
 
 
 if __name__ == "__main__":

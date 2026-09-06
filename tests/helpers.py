@@ -42,6 +42,22 @@ def restore_sync_config(token):
     sync_config.CONFIG_PATH = token
 
 
+def redirect_sync_state(tmp_root):
+    """Point sync.state's two JSON files (and the DATA_DIR ensure_data_dirs
+    uses) at a temp tree. Returns a token for restore_sync_state."""
+    from backend.sync import state as sync_state
+    token = (database.DATA_DIR, sync_state.SYNC_STATE_PATH, sync_state.UNRESOLVED_PATH)
+    database.DATA_DIR = os.path.join(tmp_root, "data")
+    sync_state.SYNC_STATE_PATH = os.path.join(database.DATA_DIR, "gmail_sync_state.json")
+    sync_state.UNRESOLVED_PATH = os.path.join(database.DATA_DIR, "unresolved_gmail_items.json")
+    return token
+
+
+def restore_sync_state(token):
+    from backend.sync import state as sync_state
+    database.DATA_DIR, sync_state.SYNC_STATE_PATH, sync_state.UNRESOLVED_PATH = token
+
+
 # --- base test cases ------------------------------------------------------
 
 class TempDBTestCase(unittest.TestCase):

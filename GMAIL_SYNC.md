@@ -416,21 +416,24 @@ sync_state.add_unresolved_item(unresolved, {
     "possibleEventType": "GENERAL_RECRUITMENT_UPDATE",
     "reason": "Two existing applications at Example Corp; email doesn't specify which role.",
     "candidateApplicationIds": [12, 15],
+    "body": message_body,                    # the plain-text email body
 })
 sync_state.save_unresolved(unresolved)
 ```
 
-Don't store the full email body — a subject, sender, dates, and your
-reasoning is enough for the user to look it up later. Still mark the
-message as processed (you *reviewed* it; you just didn't act on it) so it
-isn't re-flagged as unresolved on every future sync — unless you expect a
-later sync with more context to be able to resolve it, in which case use
-your judgment about whether marking it processed is appropriate.
+Include the plain-text `body` you already fetched — the dashboard shows it
+so the user can read what the email was about and then turn it into (or
+attach it to) an application in one click. It's truncated to ~16k
+characters on write, so just pass the body as-is. Still mark the message
+as processed (you *reviewed* it; you just didn't act on it) so it isn't
+re-flagged as unresolved on every future sync — unless you expect a later
+sync with more context to be able to resolve it, in which case use your
+judgment about whether marking it processed is appropriate.
 
 The dashboard shows a live count of unresolved items and lists them (via
-`GET /api/gmail/unresolved`, read-only) so the user can review and
-resolve them manually — either by editing the application directly in the
-UI, or by asking you to reconcile it in a future session with more
+`GET /api/gmail/unresolved`, read-only). The user can open the email,
+create or update an application from it, or discard it — all from the
+dashboard — or ask you to reconcile it in a future session with more
 context.
 
 ## Data safety

@@ -27,20 +27,10 @@ import email.policy
 import imaplib
 import re
 
+from ._gmail_text import extract_body_text as _extract_body_text
+
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
-MAX_BODY_CHARS = 20000
-
-
-def _extract_body_text(msg):
-    body_part = msg.get_body(preferencelist=("plain", "html"))
-    if body_part is None:
-        return ""
-    content = body_part.get_content()
-    if body_part.get_content_type() == "text/html":
-        content = re.sub(r"<[^>]+>", " ", content)
-        content = re.sub(r"\s+", " ", content).strip()
-    return content[:MAX_BODY_CHARS]
 
 
 def _hexid(x_gm_value):

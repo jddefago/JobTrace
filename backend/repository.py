@@ -80,6 +80,11 @@ def _now_iso():
     return datetime.datetime.now().isoformat(timespec="seconds")
 
 
+def _rate(n, d):
+    """Fraction n/d rounded to 4 dp, or 0.0 when the denominator is zero."""
+    return round(n / d, 4) if d else 0.0
+
+
 def _today_iso():
     return datetime.date.today().isoformat()
 
@@ -110,6 +115,30 @@ def _advance_max_stage(current_max, new_stage):
 # Applications: CRUD
 # ---------------------------------------------------------------------------
 
+def _insert_application(conn, clean, now):
+    """INSERT one already-validated application row and return its new id.
+    Shared by create_application and the CSV importer so the column list
+    lives in exactly one place."""
+    max_stage = clean["current_stage"] if clean["current_stage"] in constants.STAGE_RANK else constants.STAGE_PROGRESSION[0]
+    cur = conn.execute(
+        """
+        INSERT INTO applications (
+            company, position, location, application_date, current_stage,
+            outcome, source, job_url, job_description, notes,
+            max_stage_reached, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            clean["company"], clean["position"], clean.get("location", ""),
+            clean["application_date"], clean["current_stage"], clean["outcome"],
+            clean.get("source", ""), clean.get("job_url", ""),
+            clean.get("job_description", ""), clean.get("notes", ""),
+            max_stage, now, now,
+        ),
+    )
+    return cur.lastrowid
+
+
 def create_application(data, client_request_id=None):
     with _write_lock:
         conn = database.get_connection()
@@ -129,26 +158,9 @@ def create_application(data, client_request_id=None):
 
         clean = validation.validate_application_payload(payload, partial=False)
         now = _now_iso()
-        max_stage = clean["current_stage"] if clean["current_stage"] in constants.STAGE_RANK else constants.STAGE_PROGRESSION[0]
 
         try:
-            cur = conn.execute(
-                """
-                INSERT INTO applications (
-                    company, position, location, application_date, current_stage,
-                    outcome, source, job_url, job_description, notes,
-                    max_stage_reached, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    clean["company"], clean["position"], clean.get("location", ""),
-                    clean["application_date"], clean["current_stage"], clean["outcome"],
-                    clean.get("source", ""), clean.get("job_url", ""),
-                    clean.get("job_description", ""), clean.get("notes", ""),
-                    max_stage, now, now,
-                ),
-            )
-            application_id = cur.lastrowid
+            application_id = _insert_application(conn, clean, now)
 
             _insert_event(
                 conn, application_id, "Application Submitted",
@@ -778,9 +790,6 @@ def get_summary_stats():
         "SELECT COUNT(*) AS c FROM applications WHERE max_stage_reached = 'Offer' OR outcome = 'Accepted'"
     ).fetchone()["c"]
 
-    def rate(n, d):
-        return round(n / d, 4) if d else 0.0
-
     return {
         "total_applications": total,
         "pending": pending,
@@ -790,9 +799,9 @@ def get_summary_stats():
         "assessments": assessments,
         "interviews": interviews,
         "offers": offers,
-        "response_rate": rate(heard_back, total),
-        "positive_response_rate": rate(positive, total),
-        "interview_conversion_rate": rate(interviews, total),
+        "response_rate": _rate(heard_back, total),
+        "positive_response_rate": _rate(positive, total),
+        "interview_conversion_rate": _rate(interviews, total),
     }
 
 
@@ -845,17 +854,14 @@ def get_analytics(granularity="day"):
         interview_stages,
     ).fetchall()
 
-    def rate(n, d):
-        return round(n / d, 4) if d else 0.0
-
     source_performance = []
     for r in source_rows:
         source_performance.append({
             "source": r["source"],
             "total": r["total"],
-            "response_rate": rate(r["heard_back"], r["total"]),
-            "positive_response_rate": rate(r["positive"], r["total"]),
-            "interview_rate": rate(r["interviews"], r["total"]),
+            "response_rate": _rate(r["heard_back"], r["total"]),
+            "positive_response_rate": _rate(r["positive"], r["total"]),
+            "interview_rate": _rate(r["interviews"], r["total"]),
         })
 
     stage_rows = conn.execute(
@@ -874,42 +880,28 @@ def get_analytics(granularity="day"):
         {"outcome": o, "count": outcome_counts.get(o, 0)} for o in constants.OUTCOMES
     ]
 
-    # A simplified, mutually-exclusive breakdown of each application's
-    # *current* state (not "ever reached", unlike `funnel` above) -- each
-    # application lands in exactly one bucket, so the counts always sum to
-    # the total. Priority order matters: a rejected application counts as
-    # Negative even if it once reached Interview, since current status is
-    # what this view is about.
-    interview_current_stages = ["Interview 1", "Interview 2", "Final Interview"]
-    placeholders_ic = ",".join("?" * len(interview_current_stages))
-    summary_row = conn.execute(
-        f"""
-        SELECT
-            SUM(CASE WHEN outcome IN ('Negative', 'Withdrawn') THEN 1 ELSE 0 END) AS negative,
-            SUM(CASE WHEN outcome NOT IN ('Negative', 'Withdrawn')
-                      AND (current_stage = 'Offer' OR outcome = 'Accepted') THEN 1 ELSE 0 END) AS offer,
-            SUM(CASE WHEN outcome NOT IN ('Negative', 'Withdrawn')
-                      AND current_stage != 'Offer' AND outcome != 'Accepted'
-                      AND current_stage IN ({placeholders_ic}) THEN 1 ELSE 0 END) AS interview,
-            SUM(CASE WHEN outcome NOT IN ('Negative', 'Withdrawn')
-                      AND current_stage != 'Offer' AND outcome != 'Accepted'
-                      AND current_stage NOT IN ({placeholders_ic})
-                      AND current_stage = 'Assessment' THEN 1 ELSE 0 END) AS assessment
-        FROM applications
-        """,
-        interview_current_stages + interview_current_stages,
-    ).fetchone()
-    negative_c = summary_row["negative"] or 0
-    offer_c = summary_row["offer"] or 0
-    interview_c = summary_row["interview"] or 0
-    assessment_c = summary_row["assessment"] or 0
-    pending_c = stats["total_applications"] - negative_c - offer_c - interview_c - assessment_c
+    # A mutually-exclusive breakdown of each application's *current* state
+    # (not "ever reached", unlike `funnel` above) -- each application lands in
+    # exactly one bucket, so the counts always sum to the total. The checks
+    # are ordered by priority: a rejected application counts as Negative even
+    # if it once reached Interview, since current status is what this is about.
+    interview_now = set(constants.INTERVIEW_ROUNDS)
+    buckets = {"Interview": 0, "Offer": 0, "Assessment": 0, "Negative": 0, "Pending": 0}
+    for r in conn.execute("SELECT current_stage, outcome FROM applications").fetchall():
+        stage, outcome = r["current_stage"], r["outcome"]
+        if outcome in ("Negative", "Withdrawn"):
+            buckets["Negative"] += 1
+        elif stage == "Offer" or outcome == "Accepted":
+            buckets["Offer"] += 1
+        elif stage in interview_now:
+            buckets["Interview"] += 1
+        elif stage == "Assessment":
+            buckets["Assessment"] += 1
+        else:
+            buckets["Pending"] += 1
     stage_summary = [
-        {"stage": "Interview", "count": interview_c},
-        {"stage": "Offer", "count": offer_c},
-        {"stage": "Assessment", "count": assessment_c},
-        {"stage": "Negative", "count": negative_c},
-        {"stage": "Pending", "count": pending_c},
+        {"stage": k, "count": buckets[k]}
+        for k in ("Interview", "Offer", "Assessment", "Negative", "Pending")
     ]
 
     return {
@@ -1010,24 +1002,7 @@ def import_applications(valid_rows):
         inserted_ids = []
         try:
             for clean in valid_rows:
-                max_stage = clean["current_stage"] if clean["current_stage"] in constants.STAGE_RANK else constants.STAGE_PROGRESSION[0]
-                cur = conn.execute(
-                    """
-                    INSERT INTO applications (
-                        company, position, location, application_date, current_stage,
-                        outcome, source, job_url, job_description, notes,
-                        max_stage_reached, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        clean["company"], clean["position"], clean.get("location", ""),
-                        clean["application_date"], clean["current_stage"], clean["outcome"],
-                        clean.get("source", ""), clean.get("job_url", ""),
-                        clean.get("job_description", ""), clean.get("notes", ""),
-                        max_stage, now, now,
-                    ),
-                )
-                application_id = cur.lastrowid
+                application_id = _insert_application(conn, clean, now)
                 _insert_event(conn, application_id, "Application Submitted", clean["application_date"], "Imported from CSV", "import")
                 inserted_ids.append(application_id)
             conn.commit()

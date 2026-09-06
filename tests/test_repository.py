@@ -146,6 +146,21 @@ class Stats(TempDBTestCase):
         self.assertIn("funnel", data)
         self.assertIn("stage_distribution", data)
 
+    def test_analytics_stage_summary_is_mutually_exclusive(self):
+        self.make_application()                                  # -> Pending
+        a2 = self.make_application()
+        repo.update_application_stage(a2["id"], "Assessment", "Positive")
+        a3 = self.make_application()
+        repo.update_application_stage(a3["id"], "Interview 1", "Positive")
+        a4 = self.make_application()
+        repo.update_application_stage(a4["id"], "Interview 2", "Negative")  # rejected after interview
+        a5 = self.make_application()
+        repo.update_application_stage(a5["id"], "Offer", "Positive")
+
+        summary = {row["stage"]: row["count"] for row in repo.get_analytics("day")["stage_summary"]}
+        self.assertEqual({"Interview": 1, "Offer": 1, "Assessment": 1, "Negative": 1, "Pending": 1}, summary)
+        self.assertEqual(5, sum(summary.values()))               # every app in exactly one bucket
+
 
 class CsvRoundTrip(TempDBTestCase):
     def test_import_then_export(self):

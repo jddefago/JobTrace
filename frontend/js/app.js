@@ -23,7 +23,7 @@ function bindTabs() {
   });
 }
 
-/* "Update" runs whatever sync method is configured (Gmail sync), waits for
+/* "Update" runs whatever sync method is configured (email sync), waits for
    it to finish, then reloads every view so the tracker reflects it. */
 async function waitForSyncToFinish(maxMs = 120000) {
   const start = Date.now();
@@ -35,27 +35,52 @@ async function waitForSyncToFinish(maxMs = 120000) {
   return Api.getGmailSyncStatus();
 }
 
-async function runDashboardUpdate() {
-  const btn = document.getElementById("update-dashboard-btn");
-  if (btn.disabled) return;
-  btn.disabled = true;
-  btn.classList.add("is-running");
+function syncResultMessage(status) {
+  const r = (status && status.lastSyncResult) || {};
+  const parts = [];
+  if (r.applicationsCreated) parts.push(`${r.applicationsCreated} new`);
+  if (r.applicationsUpdated) parts.push(`${r.applicationsUpdated} updated`);
+  return parts.length ? `Dashboard updated — ${parts.join(", ")}` : "Dashboard updated";
+}
+
+/* Shared by the top-bar Update button and the "Sync now" button in the
+   Email status modal: kick off a sync, keep a sticky progress toast up
+   while it runs, then refresh every view and resolve the toast. */
+async function runSyncWithProgress({ onRefreshed } = {}) {
+  let firstSync = false;
+  try {
+    const summary = await Api.getSummary();
+    firstSync = !!summary && summary.total_applications === 0;
+  } catch (e) { /* non-critical — assume not the first run */ }
+
+  const prog = Utils.progressToast(firstSync ? "Running initial data pull" : "Checking for updates");
   try {
     const res = await Api.runSyncNow();
     if (!res.started) {
-      Utils.toast(res.error || "Could not start the update", "error");
+      prog.fail(res.error || "Could not start the update");
       return;
     }
     const status = await waitForSyncToFinish();
     await Dashboard.refresh();
     if (typeof Tracker !== "undefined") Tracker.refresh();
     GmailSync.loadStatus();
+    if (onRefreshed) { try { onRefreshed(); } catch (e) {} }
 
     const lr = status.lastRun;
-    if (lr && !lr.ok) Utils.toast(lr.error || "Update finished with an error", "error");
-    else Utils.toast("Dashboard updated", "success");
+    if (lr && !lr.ok) prog.fail(lr.error || "Update finished with an error");
+    else prog.finish(syncResultMessage(status), "success");
   } catch (err) {
-    Utils.toast(err.message, "error");
+    prog.fail(err.message || "Update failed");
+  }
+}
+
+async function runDashboardUpdate() {
+  const btn = document.getElementById("update-dashboard-btn");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add("is-running");
+  try {
+    await runSyncWithProgress();
   } finally {
     btn.disabled = false;
     btn.classList.remove("is-running");
@@ -106,6 +131,7 @@ async function bootstrap() {
   bindThemeToggle();
   bindUpdateButton();
   AppForm.init();
+  AppPicker.init();
   Detail.init();
   Dashboard.init();
   Tracker.init();

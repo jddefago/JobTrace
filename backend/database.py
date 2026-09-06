@@ -125,15 +125,9 @@ def _migrate_schema(conn):
     conn.commit()
 
 
-def get_connection():
-    """Return a connection for the current thread, creating the DB/schema
-    on first use. The server is threaded, so each worker thread gets its
-    own connection (sqlite3 connections are not thread-safe to share).
-    """
-    conn = getattr(_local, "conn", None)
-    if conn is not None:
-        return conn
-
+def _open():
+    """Open a connection with the app's standard settings, ensure the schema
+    exists, and run additive migrations."""
     ensure_data_dirs()
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
@@ -142,6 +136,18 @@ def get_connection():
     conn.executescript(SCHEMA)
     conn.commit()
     _migrate_schema(conn)
+    return conn
+
+
+def get_connection():
+    """Return a connection for the current thread, creating the DB/schema
+    on first use. The server is threaded, so each worker thread gets its
+    own connection (sqlite3 connections are not thread-safe to share).
+    """
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        return conn
+    conn = _open()
     _local.conn = conn
     return conn
 
@@ -151,12 +157,4 @@ def new_connection():
     scripts (e.g. the Gmail sync helper, or a future automation worker)
     that are not part of the request-per-thread web server lifecycle.
     """
-    ensure_data_dirs()
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.execute("PRAGMA journal_mode = WAL;")
-    conn.executescript(SCHEMA)
-    conn.commit()
-    _migrate_schema(conn)
-    return conn
+    return _open()

@@ -118,12 +118,19 @@ def save_unresolved(items):
     _write_json_atomic(UNRESOLVED_PATH, items)
 
 
+# Cap on the stored email body so unresolved_gmail_items.json stays small
+# even if a sync flags many items. Enough to read what an email is about.
+_MAX_STORED_BODY = 16000
+
+
 def add_unresolved_item(items, item):
     """`item` should include at least: gmailMessageId, emailDate, sender,
     subject, reason. possibleCompany/possiblePosition/possibleEventType/
-    candidateApplicationIds are optional. Adds recordedAt and a local id
-    automatically."""
+    candidateApplicationIds/body are optional. Adds recordedAt and a local id
+    automatically. `body` (the plain-text email body) is truncated and lets
+    the dashboard show the user what the email was about."""
     next_id = 1 + max([it.get("id", 0) for it in items], default=0)
+    body = item.get("body") or ""
     row = {
         "id": next_id,
         "gmailMessageId": item.get("gmailMessageId"),
@@ -135,6 +142,7 @@ def add_unresolved_item(items, item):
         "possibleEventType": item.get("possibleEventType"),
         "reason": item.get("reason"),
         "candidateApplicationIds": item.get("candidateApplicationIds", []),
+        "body": body[:_MAX_STORED_BODY] or None,
         "recordedAt": datetime.datetime.now().isoformat(timespec="seconds"),
     }
     items.append(row)

@@ -28,11 +28,11 @@ const GmailSync = (() => {
     btn.classList.remove("is-stale", "is-very-stale", "has-unresolved");
 
     if (status.running) {
-      btn.title = "Gmail: syncing…";
+      btn.title = "Email: checking…";
       return;
     }
     if (!status.lastSuccessfulSync) {
-      btn.title = status.autoEnabled ? "Gmail: waiting for first sync" : "Gmail not synced yet";
+      btn.title = status.autoEnabled ? "Email: waiting for first check" : "Email not checked yet";
       return;
     }
     const r = status.lastSyncResult || {};
@@ -40,16 +40,16 @@ const GmailSync = (() => {
     if (r.applicationsCreated) parts.push(`${r.applicationsCreated} new`);
     if (r.applicationsUpdated) parts.push(`${r.applicationsUpdated} updated`);
     if (!parts.length) parts.push(`${r.emailsReviewed || 0} reviewed`);
-    let title = `Gmail: ${fmt(status.lastSuccessfulSync)} · ${parts.join(" · ")}`;
+    let title = `Email: ${fmt(status.lastSuccessfulSync)} · ${parts.join(" · ")}`;
     btn.classList.toggle("has-unresolved", status.unresolvedCount > 0);
 
     const age = Date.now() - Date.parse(status.lastSuccessfulSync);
     if (status.autoEnabled && age >= VERY_STALE_MS) {
       btn.classList.add("is-very-stale");
-      title += " — no successful automatic sync in days, check Gmail sync settings.";
+      title += " — no successful automatic check in days, open Email settings.";
     } else if (status.autoEnabled && age >= STALE_MS) {
       btn.classList.add("is-stale");
-      title += " — the automatic sync hasn't succeeded in a while.";
+      title += " — the automatic check hasn't succeeded in a while.";
     }
     btn.title = title;
   }
@@ -59,6 +59,90 @@ const GmailSync = (() => {
     return Utils.el("div", { class: "gmail-stat-row" }, [
       Utils.el("span", { class: "gmail-stat-label" }, label),
       Utils.el("span", { class: "gmail-stat-value" }, String(value ?? 0)),
+    ]);
+  }
+
+  // ---- unresolved items: open / add / attach / discard ----------------
+  function inferSource(sender) {
+    const s = (sender || "").toLowerCase();
+    if (s.includes("linkedin.com")) return "LinkedIn";
+    if (s.includes("indeed.com")) return "Indeed";
+    if (s.includes("glassdoor")) return "Glassdoor";
+    return "";
+  }
+
+  function itemNote(item) {
+    const subj = item.subject || "(no subject)";
+    return `From email: "${subj}"${item.reason ? " — " + item.reason : ""}`;
+  }
+
+  function newAppPrefill(item) {
+    const p = {
+      company: item.possibleCompany || "",
+      position: item.possiblePosition || "",
+      source: inferSource(item.sender),
+      notes: itemNote(item),
+    };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(item.emailDate || "")) p.application_date = item.emailDate;
+    return p;
+  }
+
+  async function resolveItem(id) {
+    try { await Api.deleteUnresolved(id); } catch (e) { /* already gone is fine */ }
+    loadStatus();
+    if (typeof Dashboard !== "undefined") Dashboard.refresh();
+    if (!document.getElementById("gmail-sync-overlay").hidden && view === "status") renderModal();
+  }
+
+  function openEmailView(item) {
+    document.getElementById("email-view-title").textContent = item.subject || "Email";
+    const meta = document.getElementById("email-view-meta");
+    meta.innerHTML = "";
+    meta.appendChild(Utils.el("div", {}, [Utils.el("strong", {}, "From: "), document.createTextNode(item.sender || "Unknown sender")]));
+    if (item.emailDate) meta.appendChild(Utils.el("div", {}, [Utils.el("strong", {}, "Date: "), document.createTextNode(item.emailDate)]));
+    if (item.reason) meta.appendChild(Utils.el("div", {}, [Utils.el("strong", {}, "Why it's unresolved: "), document.createTextNode(item.reason)]));
+    const bodyEl = document.getElementById("email-view-body");
+    bodyEl.textContent = item.body
+      || "The email body wasn't captured for this item — it was synced before this feature, or the sync didn't save it. Open it in Gmail to read the full message.";
+    Utils.openOverlay("email-view-overlay");
+  }
+
+  function unresolvedItemRow(item) {
+    const openBtn = Utils.el("button", { class: "btn btn-ghost btn-sm", type: "button", onclick: () => openEmailView(item) }, "Open email");
+    const newBtn = Utils.el("button", {
+      class: "btn btn-ghost btn-sm", type: "button",
+      onclick: () => AppForm.openCreate({ prefill: newAppPrefill(item), onSaved: () => resolveItem(item.id) }),
+    }, "+ New application");
+
+    const attachBtn = Utils.el("button", {
+      class: "btn btn-ghost btn-sm", type: "button",
+      onclick: () => AppPicker.open({
+        onPick: (app) => AppForm.openEdit(app, {
+          prefill: { source: inferSource(item.sender) },
+          onSaved: () => resolveItem(item.id),
+        }),
+      }),
+    }, "Attach to existing…");
+
+    const discardBtn = Utils.el("button", {
+      class: "btn btn-danger btn-sm", type: "button",
+      onclick: async () => {
+        const ok = await Utils.confirmDialog("Discard this email?",
+          "It's removed from the unresolved list. No application is touched.");
+        if (!ok) return;
+        await resolveItem(item.id);
+        Utils.toast("Discarded", "success");
+      },
+    }, "Discard");
+
+    return Utils.el("div", { class: "gmail-unresolved-item" }, [
+      Utils.el("div", { class: "gmail-unresolved-top" }, [
+        Utils.el("span", { class: "gmail-unresolved-subject" }, item.subject || "(no subject)"),
+        Utils.el("span", { class: "gmail-unresolved-date" }, item.emailDate || ""),
+      ]),
+      Utils.el("div", { class: "gmail-unresolved-meta" }, `${item.sender || "Unknown sender"}${item.possibleCompany ? ` · ${item.possibleCompany}` : ""}${item.possiblePosition ? ` — ${item.possiblePosition}` : ""}`),
+      Utils.el("div", { class: "gmail-unresolved-reason" }, item.reason || ""),
+      Utils.el("div", { class: "gmail-unresolved-actions" }, [openBtn, newBtn, attachBtn, discardBtn]),
     ]);
   }
 
@@ -72,7 +156,7 @@ const GmailSync = (() => {
     }
 
     body.appendChild(Utils.el("div", { class: "gmail-last-sync" },
-      status.lastSuccessfulSync ? `Last sync: ${fmt(status.lastSuccessfulSync)}` : "Gmail not synced yet"));
+      status.lastSuccessfulSync ? `Last checked: ${fmt(status.lastSuccessfulSync)}` : "Email not checked yet"));
 
     body.appendChild(Utils.el("div", { class: "gmail-account-line" },
       status.connectedAccount
@@ -105,22 +189,15 @@ const GmailSync = (() => {
     } else {
       const list = Utils.el("div", { class: "gmail-unresolved-list" });
       for (const item of unresolved.items) {
-        list.appendChild(Utils.el("div", { class: "gmail-unresolved-item" }, [
-          Utils.el("div", { class: "gmail-unresolved-top" }, [
-            Utils.el("span", { class: "gmail-unresolved-subject" }, item.subject || "(no subject)"),
-            Utils.el("span", { class: "gmail-unresolved-date" }, item.emailDate || ""),
-          ]),
-          Utils.el("div", { class: "gmail-unresolved-meta" }, `${item.sender || "Unknown sender"}${item.possibleCompany ? ` · ${item.possibleCompany}` : ""}${item.possiblePosition ? ` — ${item.possiblePosition}` : ""}`),
-          Utils.el("div", { class: "gmail-unresolved-reason" }, item.reason || ""),
-        ]));
+        list.appendChild(unresolvedItemRow(item));
       }
       body.appendChild(list);
     }
 
     body.appendChild(Utils.el("p", { class: "gmail-sync-note" },
       status.method === "manual"
-        ? "Sync runs when you ask your AI assistant to (\"sync my Gmail\"). Turn on automatic sync under Settings."
-        : `Automatic sync is ${status.autoEnabled ? "on" : "off"} (${status.method}, every ${status.intervalHours}h). Configure it under Settings.`));
+        ? "Email is checked when you ask your AI assistant to (\"sync my Gmail\"). Turn on automatic checks under Settings."
+        : `Automatic checks are ${status.autoEnabled ? "on" : "off"} (${status.method}, every ${status.intervalHours}h). Configure them under Settings.`));
   }
 
   // ---- settings view ----------------------------------------------
@@ -245,7 +322,7 @@ const GmailSync = (() => {
       wrap.appendChild(Utils.el("p", { class: "sync-fineprint" },
         "1. pip install google-api-python-client google-auth-oauthlib\n" +
         "2. Save your OAuth client JSON as data/gmail_api_credentials.json\n" +
-        "3. Run the one-time consent:  python3 backend/gmail_api_sync.py --dry-run\n" +
+        "3. Run the one-time consent:  python3 backend/sync/agent.py --dry-run\n" +
         "Full walkthrough in GMAIL_SYNC_SETUP.md."));
     }
 
@@ -321,15 +398,19 @@ const GmailSync = (() => {
     }
 
     if (cfg.method !== "manual") {
-      const runBtn = Utils.el("button", { class: "btn btn-primary btn-sm", type: "button" }, "Sync now");
+      const runBtn = Utils.el("button", { class: "btn btn-primary btn-sm", type: "button" }, "Check now");
       runBtn.addEventListener("click", async () => {
         runBtn.disabled = true;
         try {
-          const res = await Api.runSyncNow();
-          Utils.toast(res.started ? "Sync started — this can take a minute" : (res.error || "Could not start"), res.started ? "success" : "error");
-          setTimeout(() => { loadStatus(); if (view === "status") renderModal(); }, 4000);
-        } catch (err) { Utils.toast(err.message, "error"); }
-        finally { setTimeout(() => (runBtn.disabled = false), 3000); }
+          await runSyncWithProgress({
+            onRefreshed: () => {
+              loadStatus();
+              if (!document.getElementById("gmail-sync-overlay").hidden) renderModal();
+            },
+          });
+        } finally {
+          runBtn.disabled = false;
+        }
       });
       body.appendChild(Utils.el("div", { class: "sync-run-row" }, [runBtn]));
     }
@@ -380,6 +461,13 @@ const GmailSync = (() => {
     document.getElementById("gmail-sync-ok").addEventListener("click", close);
     document.getElementById("gmail-sync-overlay").addEventListener("click", (e) => {
       if (e.target.id === "gmail-sync-overlay") close();
+    });
+
+    const closeEmail = () => Utils.closeOverlay("email-view-overlay");
+    document.getElementById("email-view-close").addEventListener("click", closeEmail);
+    document.getElementById("email-view-ok").addEventListener("click", closeEmail);
+    document.getElementById("email-view-overlay").addEventListener("click", (e) => {
+      if (e.target.id === "email-view-overlay") closeEmail();
     });
   }
 

@@ -18,6 +18,14 @@ venv/
 # macOS / editor noise.
 .DS_Store
 
+# Local one-off / scratch scripts and their output at the repo root
+# (never part of the app). Anchored with a leading "/" so real modules like
+# backend/sync/_gmail_text.py are unaffected.
+/_*.py
+/_*.txt
+/_*.log
+/_*.json
+
 # Local desktop shortcut — hardcodes an absolute path on this machine.
 JobTrace.lnk
 

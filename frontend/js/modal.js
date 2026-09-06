@@ -4,6 +4,7 @@ const AppForm = (() => {
   let mode = "create"; // 'create' | 'edit'
   let clientRequestId = null;
   let editingId = null;
+  let savedCallback = null; // run once after a successful create/save
 
   function populateSelects() {
     const stageSel = document.getElementById("f-stage");
@@ -55,28 +56,64 @@ const AppForm = (() => {
     }
   }
 
-  function openCreate() {
+  /* Set only the fields present (and non-empty) in `p`; leaves the rest of
+     the form as it was. `source` handles the custom-source row. */
+  function applyPrefill(p) {
+    if (!p) return;
+    const setVal = (id, v) => { if (v !== undefined && v !== null && v !== "") document.getElementById(id).value = v; };
+    setVal("f-company", p.company);
+    setVal("f-position", p.position);
+    setVal("f-location", p.location);
+    setVal("f-date", p.application_date);
+    setVal("f-job-url", p.job_url);
+    setVal("f-notes", p.notes);
+    if (p.source) {
+      const sel = document.getElementById("f-source");
+      if (State.meta.default_sources.includes(p.source)) {
+        sel.value = p.source;
+        document.getElementById("f-source-custom-row").hidden = true;
+      } else {
+        sel.value = "__custom__";
+        document.getElementById("f-source-custom-row").hidden = false;
+        document.getElementById("f-source-custom").value = p.source;
+      }
+    }
+  }
+
+  function openCreate(opts = {}) {
     mode = "create";
     editingId = null;
+    savedCallback = opts.onSaved || null;
     clientRequestId = Utils.uuid();
     document.getElementById("app-form-title").textContent = "Add Application";
     document.getElementById("app-form-submit").textContent = "Add Application";
     resetForm();
+    applyPrefill(opts.prefill);
     Utils.openOverlay("app-form-overlay");
     document.getElementById("f-company").focus();
   }
 
-  function openEdit(app) {
+  function openEdit(app, opts = {}) {
     mode = "edit";
     editingId = app.id;
+    savedCallback = opts.onSaved || null;
     document.getElementById("app-form-title").textContent = "Edit Application";
     document.getElementById("app-form-submit").textContent = "Save Changes";
     fillForm(app);
+    if (opts.prefill) {
+      // Only fill fields the application doesn't already have a value for.
+      const blankOnly = {};
+      for (const [k, v] of Object.entries(opts.prefill)) {
+        if (!app[k]) blankOnly[k] = v;
+      }
+      applyPrefill(blankOnly);
+    }
     Utils.openOverlay("app-form-overlay");
   }
 
   function close() {
     Utils.closeOverlay("app-form-overlay");
+    savedCallback = null;
   }
 
   function gatherPayload() {
@@ -117,7 +154,9 @@ const AppForm = (() => {
           Detail.open(editingId);
         }
       }
+      const cb = savedCallback;
       close();
+      if (cb) { try { await cb(); } catch (e) {} }
       if (typeof Dashboard !== "undefined") Dashboard.refresh();
     } catch (err) {
       Utils.toast(err.message, "error");
@@ -140,4 +179,71 @@ const AppForm = (() => {
   }
 
   return { init, openCreate, openEdit, close };
+})();
+
+/* Searchable "pick one of my applications" modal. Used to attach an
+   unresolved email to an existing application. */
+const AppPicker = (() => {
+  let onPick = null;
+  let apps = [];
+
+  function close() {
+    Utils.closeOverlay("app-picker-overlay");
+    onPick = null;
+  }
+
+  function choose(app) {
+    const cb = onPick;
+    close();
+    if (cb) cb(app);
+  }
+
+  function render(filter) {
+    const list = document.getElementById("app-picker-list");
+    list.innerHTML = "";
+    const q = (filter || "").trim().toLowerCase();
+    const rows = q
+      ? apps.filter((a) => `${a.company} ${a.position}`.toLowerCase().includes(q))
+      : apps;
+    if (!rows.length) {
+      list.appendChild(Utils.el("div", { class: "empty-state" }, apps.length ? "No matches." : "No open applications."));
+      return;
+    }
+    for (const a of rows) {
+      list.appendChild(Utils.el("button", { class: "app-picker-row", type: "button", onclick: () => choose(a) }, [
+        Utils.el("span", { class: "app-picker-company" }, a.company),
+        Utils.el("span", { class: "app-picker-position" }, a.position),
+        Utils.el("span", { class: Utils.stageBadgeClass(a.current_stage) }, a.current_stage),
+      ]));
+    }
+  }
+
+  async function open(opts = {}) {
+    onPick = opts.onPick || null;
+    const search = document.getElementById("app-picker-search");
+    const list = document.getElementById("app-picker-list");
+    search.value = "";
+    list.innerHTML = "";
+    list.appendChild(Utils.el("div", { class: "empty-state" }, "Loading…"));
+    Utils.openOverlay("app-picker-overlay");
+    search.focus();
+    try {
+      const res = await Api.listApplications({ page_size: 500, sort_by: "company", sort_order: "asc" });
+      apps = (res.items || []).filter((a) => a.current_stage !== "Closed");
+      render("");
+    } catch (err) {
+      list.innerHTML = "";
+      list.appendChild(Utils.el("div", { class: "empty-state" }, err.message));
+    }
+  }
+
+  function init() {
+    document.getElementById("app-picker-close").addEventListener("click", close);
+    document.getElementById("app-picker-overlay").addEventListener("click", (e) => {
+      if (e.target.id === "app-picker-overlay") close();
+    });
+    document.getElementById("app-picker-search").addEventListener("input", (e) => render(e.target.value));
+  }
+
+  return { init, open };
 })();

@@ -12,10 +12,16 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 from .. import database
 from . import config as sync_config
+
+# The server runs windowless (pythonw), but on Windows a child process
+# spawned from it still gets its own console -- which flashes on screen and
+# vanishes the instant the short-lived `mcp list` check exits. Suppress it.
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 _CACHE = {"at": 0.0, "data": None}
 _CACHE_TTL = 30.0
@@ -119,7 +125,11 @@ def _cli_has_gmail(binary):
     if any("gmail" in name.lower() for name in _claude_ai_connectors()):
         return True
     try:
-        out = subprocess.run([binary, "mcp", "list"], capture_output=True, text=True, timeout=20)
+        out = subprocess.run(
+            [binary, "mcp", "list"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+            creationflags=_NO_WINDOW,
+        )
     except (subprocess.TimeoutExpired, OSError):
         return None
     blob = (out.stdout or "") + (out.stderr or "")

@@ -30,6 +30,11 @@ PORT = 8766
 ROUTES = []
 
 
+def _q(query, key, default=None):
+    """First value for `key` in a urllib.parse.parse_qs() dict, or `default`."""
+    return query.get(key, [default])[0]
+
+
 def route(method, pattern):
     regex = re.compile("^" + pattern + "$")
 
@@ -68,18 +73,18 @@ def meta_distinct(handler, match, query, body):
 @route("GET", r"/api/applications")
 def list_applications(handler, match, query, body):
     result = repository.list_applications(
-        search=query.get("search", [None])[0],
-        stage=query.get("stage", [None])[0],
-        outcome=query.get("outcome", [None])[0],
-        company=query.get("company", [None])[0],
-        source=query.get("source", [None])[0],
-        location=query.get("location", [None])[0],
-        date_from=query.get("date_from", [None])[0],
-        date_to=query.get("date_to", [None])[0],
-        sort_by=query.get("sort_by", ["application_date"])[0],
-        sort_order=query.get("sort_order", ["desc"])[0],
-        page=query.get("page", [1])[0],
-        page_size=query.get("page_size", [50])[0],
+        search=_q(query, "search"),
+        stage=_q(query, "stage"),
+        outcome=_q(query, "outcome"),
+        company=_q(query, "company"),
+        source=_q(query, "source"),
+        location=_q(query, "location"),
+        date_from=_q(query, "date_from"),
+        date_to=_q(query, "date_to"),
+        sort_by=_q(query, "sort_by", "application_date"),
+        sort_order=_q(query, "sort_order", "desc"),
+        page=_q(query, "page", 1),
+        page_size=_q(query, "page_size", 50),
     )
     return 200, result
 
@@ -219,7 +224,7 @@ def stats_summary(handler, match, query, body):
 
 @route("GET", r"/api/stats/analytics")
 def stats_analytics(handler, match, query, body):
-    granularity = query.get("granularity", ["day"])[0]
+    granularity = _q(query, "granularity", "day")
     if granularity not in ("day", "week", "month"):
         granularity = "day"
     return 200, repository.get_analytics(granularity)
@@ -251,6 +256,18 @@ def gmail_unresolved(handler, match, query, body):
     return 200, {"items": sync_state.load_unresolved()}
 
 
+@route("DELETE", r"/api/gmail/unresolved/(?P<id>\d+)")
+def gmail_unresolved_delete(handler, match, query, body):
+    # Used both for "discard" and to clear an item the user has just turned
+    # into (or attached to) an application from the dashboard.
+    items = sync_state.load_unresolved()
+    removed = sync_state.remove_unresolved_item(items, int(match.group("id")))
+    if not removed:
+        return 404, {"error": "Unresolved item not found"}
+    sync_state.save_unresolved(items)
+    return 200, {"deleted": True}
+
+
 # --- Sync configuration + automation ------------------------------------
 
 @route("GET", r"/api/sync/config")
@@ -267,7 +284,7 @@ def sync_config_put(handler, match, query, body):
 
 @route("GET", r"/api/sync/doctor")
 def sync_doctor_get(handler, match, query, body):
-    force = query.get("force", ["0"])[0] in ("1", "true", "yes")
+    force = _q(query, "force", "0") in ("1", "true", "yes")
     return 200, sync_doctor.report(force=force)
 
 

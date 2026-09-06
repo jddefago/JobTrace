@@ -12,6 +12,7 @@ from http.server import ThreadingHTTPServer
 from backend import database
 from tests.helpers import (
     redirect_database, restore_database, redirect_sync_config, restore_sync_config,
+    redirect_sync_state, restore_sync_state,
 )
 
 
@@ -21,6 +22,7 @@ class ServerSmokeTests(unittest.TestCase):
         cls._tmp = tempfile.mkdtemp(prefix="jobtrace-srv-")
         cls._db_token = redirect_database(cls._tmp)
         cls._cfg_token = redirect_sync_config(cls._tmp)
+        cls._state_token = redirect_sync_state(cls._tmp)
         database.get_connection()
 
         from backend import server
@@ -39,6 +41,7 @@ class ServerSmokeTests(unittest.TestCase):
         cls.server.shutdown()
         cls.server.server_close()
         cls.thread.join(timeout=5)
+        restore_sync_state(cls._state_token)
         restore_database(cls._db_token)
         restore_sync_config(cls._cfg_token)
         shutil.rmtree(cls._tmp, ignore_errors=True)
@@ -94,6 +97,24 @@ class ServerSmokeTests(unittest.TestCase):
 
     def test_unknown_route_is_404(self):
         status, _ = self._req("GET", "/api/nope")
+        self.assertEqual(404, status)
+
+    def test_unresolved_item_delete(self):
+        from backend.sync import state as sync_state
+        items = sync_state.load_unresolved()
+        row = sync_state.add_unresolved_item(items, {
+            "gmailMessageId": "m-http", "reason": "test", "body": "hello world"})
+        sync_state.save_unresolved(items)
+
+        status, listing = self._req("GET", "/api/gmail/unresolved")
+        self.assertEqual(200, status)
+        self.assertEqual("hello world", listing["items"][-1]["body"])
+
+        status, body = self._req("DELETE", f"/api/gmail/unresolved/{row['id']}")
+        self.assertEqual(200, status)
+        self.assertTrue(body["deleted"])
+
+        status, _ = self._req("DELETE", f"/api/gmail/unresolved/{row['id']}")
         self.assertEqual(404, status)
 
     def test_sync_config_put_roundtrip(self):

@@ -17,12 +17,18 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 
 from .. import database
 from . import config as sync_config, doctor as sync_doctor, state as sync_state
 
 BASE_DIR = database.BASE_DIR
+
+# The server runs windowless (pythonw), but on Windows a child process
+# spawned from it still gets its own console, which flashes on screen for
+# the duration of the CLI sync run. Suppress it.
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 TASK_PROMPT_PATH = os.path.join(BASE_DIR, "GMAIL_SYNC_TASK_PROMPT.md")
 RUNS_PATH = os.path.join(database.DATA_DIR, "sync_runs.json")
 SYNC_LOG_DIR = os.path.join(database.DATA_DIR, "sync_logs")
@@ -110,7 +116,9 @@ def _run_cli(cfg, log):
     try:
         proc = subprocess.run(
             argv, input=prompt, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
             cwd=BASE_DIR, timeout=CLI_TIMEOUT_SECONDS,
+            creationflags=_NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"The {name} sync run timed out after {CLI_TIMEOUT_SECONDS//60} minutes.",
@@ -267,8 +275,9 @@ class SyncScheduler:
         return {**entry, "busy": False}
 
     def run_now_async(self, trigger="manual"):
-        if self._running:
-            return {"started": False, "error": "A sync is already running."}
+        with self._run_lock:
+            if self._running:
+                return {"started": False, "error": "A sync is already running."}
         threading.Thread(target=self.run_now, kwargs={"trigger": trigger},
                          name="jobtrace-sync-manual", daemon=True).start()
         return {"started": True}

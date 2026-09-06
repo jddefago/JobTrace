@@ -644,6 +644,15 @@ a { color: var(--brass); }
 }
 .overlay.center { justify-content: center; align-items: center; }
 
+/* Overlays that can be launched from on top of another overlay (e.g. from
+   the Email status modal) must stack above it; the confirm dialog tops all. */
+#detail-overlay,
+#app-form-overlay,
+#event-form-overlay,
+#app-picker-overlay,
+#email-view-overlay { z-index: 110; }
+#confirm-overlay { z-index: 120; }
+
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 .side-panel {
@@ -766,6 +775,75 @@ a { color: var(--brass); }
 .gmail-unresolved-date { font-size: 11.5px; color: var(--text-low); font-family: var(--font-mono); white-space: nowrap; }
 .gmail-unresolved-meta { font-size: 12px; color: var(--text-mid); margin-top: 3px; }
 .gmail-unresolved-reason { font-size: 12px; color: var(--text-low); margin-top: 5px; font-style: italic; }
+.gmail-unresolved-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+/* Attach-to-an-application picker */
+.app-picker-search {
+  width: 100%;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  color: var(--text-hi);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.app-picker-search:focus { outline: none; border-color: var(--brass); }
+.app-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.app-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--panel-sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.app-picker-row:hover { border-color: var(--brass-line); background: var(--panel-raised); }
+.app-picker-row:focus-visible { outline: none; border-color: var(--brass); }
+.app-picker-company { font-weight: 600; color: var(--text-hi); font-size: 13px; flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-picker-position { color: var(--text-mid); font-size: 12.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-picker-row .badge { flex-shrink: 0; }
+
+/* Read-the-email modal */
+.email-view-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+  color: var(--text-mid);
+  margin-bottom: 10px;
+}
+.email-view-meta strong { color: var(--text-hi); }
+.email-view-body {
+  background: var(--panel-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-mid);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 55vh;
+  overflow-y: auto;
+}
 
 .gmail-sync-note { font-size: 12px; color: var(--text-low); margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
@@ -1094,6 +1172,30 @@ a { color: var(--brass); }
 .toast.toast-success { border-color: var(--positive-border); color: var(--positive); }
 
 @keyframes slideIn { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.toast-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 14px;
+  border-left: 2px solid var(--brass);
+  color: var(--text-hi);
+}
+.toast-progress-label { flex: 1; }
+.toast-dots { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.toast-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brass);
+  animation: toastDot 1.2s ease-in-out infinite;
+}
+.toast-dots span:nth-child(2) { animation-delay: 0.15s; }
+.toast-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes toastDot {
+  0%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
 
 /* ============================================================
    Misc

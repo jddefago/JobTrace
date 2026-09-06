@@ -131,6 +131,28 @@ const Utils = (() => {
     setTimeout(() => node.remove(), 3800);
   }
 
+  /* A toast that stays put (animated dots, no auto-dismiss) until the caller
+     resolves it. Use for a running sync: progressToast("Checking for
+     updates") -> later p.finish("Dashboard updated") or p.fail(err). */
+  function progressToast(label) {
+    const container = document.getElementById("toast-container");
+    const dots = el("span", { class: "toast-dots" }, [el("span"), el("span"), el("span")]);
+    const node = el("div", { class: "toast toast-progress" }, [
+      el("span", { class: "toast-progress-label" }, label),
+      dots,
+    ]);
+    container.appendChild(node);
+
+    let removed = false;
+    const remove = () => { if (!removed) { removed = true; node.remove(); } };
+    const finish = (msg, type = "success") => {
+      node.className = `toast toast-${type === "error" ? "error" : "success"}`;
+      node.textContent = msg;
+      setTimeout(remove, 3800);
+    };
+    return { finish, fail: (msg) => finish(msg, "error"), remove };
+  }
+
   function openOverlay(id) {
     document.getElementById(id).hidden = false;
   }
@@ -157,6 +179,6 @@ const Utils = (() => {
 
   return {
     todayIso, formatDate, formatDateTime, formatPercent, escapeHtml, el, debounce, uuid,
-    stageBadgeClass, outcomeBadgeClass, stageRail, toast, openOverlay, closeOverlay, confirmDialog, resolveConfirm,
+    stageBadgeClass, outcomeBadgeClass, stageRail, toast, progressToast, openOverlay, closeOverlay, confirmDialog, resolveConfirm,
   };
 })();
