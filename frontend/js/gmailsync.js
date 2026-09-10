@@ -2,7 +2,8 @@
    under "Settings", configures how sync runs.
 
    Three choices in Settings, each deciding *when* and *what runs*:
-     - Ask my assistant       : you say "sync my Gmail"; nothing automatic
+     - Only when I press Update : nothing automatic; the Update button (or
+                                 asking an AI assistant) runs a sync
      - When I open JobTrace,
        via the CLI            : on dashboard load (once/day), the server
                                 shells out to `claude` / `codex`
@@ -200,7 +201,7 @@ const GmailSync = (() => {
 
     body.appendChild(Utils.el("p", { class: "gmail-sync-note" },
       status.method === "manual"
-        ? "Email is checked when you ask your AI assistant to (\"sync my Gmail\"). Switch to an automatic method under Settings."
+        ? "Email is checked only when you press Update (or ask your AI assistant to \"sync my Gmail\"). Switch to an automatic method under Settings."
         : `Email is checked automatically when you open JobTrace, at most once a day (${status.method}). Change this under Settings.`));
   }
 
@@ -215,7 +216,7 @@ const GmailSync = (() => {
   function methodRadios() {
     const wrap = Utils.el("div", { class: "sync-method-radios" });
     for (const [val, label, hint] of [
-      ["manual", "Ask my assistant", "You say “sync my Gmail”. Nothing automatic, no setup."],
+      ["manual", "Only when I press Update", "No automatic sync. Press Update (top bar) to check on demand, or ask your AI assistant to “sync my Gmail”. No setup."],
       ["cli", "Sync when I open JobTrace — via the CLI", "On open (once a day), the server runs the claude / codex CLI, signed in with a Gmail connector."],
       ["keys", "Sync when I open JobTrace — with my API keys", "On open (once a day), the server runs it in-process with your Gmail access + Anthropic API key. No assistant app."],
     ]) {
@@ -381,7 +382,7 @@ const GmailSync = (() => {
 
     if (cfg.method === "manual") {
       body.appendChild(Utils.el("p", { class: "sync-fineprint" },
-        "Say “sync my Gmail” to Claude (Desktop, Code, or Cowork) with this folder open. It reads GMAIL_SYNC.md and updates the tracker. Nothing to install."));
+        "Nothing runs on its own. Press Update in the top bar whenever you want a check — or open this folder with an AI assistant (Claude Desktop, Code, or Cowork) and say “sync my Gmail”; it reads GMAIL_SYNC.md and updates the tracker. Nothing to install."));
     } else if (cfg.method === "cli") {
       body.appendChild(cliBlock());
     } else {
