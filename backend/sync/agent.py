@@ -1,7 +1,7 @@
 """Headless Gmail -> JobTrace sync using the user's own Anthropic API key
 plus their own Gmail access. Unlike GMAIL_SYNC.md's workflow, this does NOT
 need an AI assistant app (Claude Desktop/Code, Codex CLI) installed -- it
-calls Gmail and the Anthropic API directly, so the scheduler (or a cron
+calls Gmail and the Anthropic API directly, so the sync runner (or a cron
 job) can run it with nothing but Python installed.
 
 Two ways to reach Gmail, chosen by config `gmail_transport`:
@@ -68,7 +68,7 @@ DEFAULT_MODEL = "claude-sonnet-5"
 MAX_TURNS = 60
 
 # Per-request timeout for the Anthropic API, and an overall wall-clock cap on
-# the whole agent loop. Without these a hung request would pin the scheduler's
+# the whole agent loop. Without these a hung request would pin the runner's
 # "running" flag forever, blocking every future sync (the CLI path already has
 # its own subprocess timeout).
 API_TIMEOUT_SECONDS = 120.0
@@ -795,7 +795,7 @@ def _run_sync_with_fetcher(config, fetcher, dry_run, log):
 
 
 # ---------------------------------------------------------------------------
-# Library entry point (used by backend/sync/scheduler.py)
+# Library entry point (used by backend/sync/runner.py)
 # ---------------------------------------------------------------------------
 
 def run_job(config=None, dry_run=False, log=None):

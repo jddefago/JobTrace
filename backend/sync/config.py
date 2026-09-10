@@ -14,17 +14,13 @@ from .. import database
 
 CONFIG_PATH = os.path.join(database.DATA_DIR, "sync_config.json")
 
-# method:
-#   "manual"  -- no automation. You ask your AI assistant to sync (default).
-#   "cli"     -- automation by shelling out to the `claude` / `codex` CLI.
-#   "keys"    -- automation in-process using a Gmail app password (IMAP) or a
-#                Google OAuth token, plus your own Anthropic API key.
+# method -- also decides *when* sync runs:
+#   "manual"  -- nothing automatic. You ask your AI assistant to sync (default).
+#   "cli"     -- on dashboard load (once/day max), shell out to `claude`/`codex`.
+#   "keys"    -- on dashboard load (once/day max), run in-process using a Gmail
+#                app password (IMAP) or a Google OAuth token + your Anthropic key.
 DEFAULTS = {
     "method": "manual",
-    "auto": {
-        "enabled": False,
-        "interval_hours": 6,
-    },
     "cli": {
         "command": "claude",          # "claude" | "codex"
     },
@@ -73,7 +69,7 @@ def _prune_to_shape(value, shape):
 
 
 def load():
-    """Full config including secrets — for the scheduler / sync jobs only."""
+    """Full config including secrets — for the runner / sync jobs only."""
     with _lock:
         stored = {}
         if os.path.exists(CONFIG_PATH):
@@ -82,7 +78,9 @@ def load():
                     stored = json.load(f) or {}
             except (json.JSONDecodeError, OSError):
                 stored = {}
-        return _deep_merge(DEFAULTS, stored)
+        # Prune to DEFAULTS' shape so a stale section from an older version
+        # (e.g. the removed "auto" timer block) never reaches callers.
+        return _prune_to_shape(_deep_merge(DEFAULTS, stored), DEFAULTS)
 
 
 def _write(cfg):
@@ -130,12 +128,6 @@ def update(patch):
 
         # clamp / sanitise
         merged["method"] = merged["method"] if merged["method"] in ("manual", "cli", "keys") else "manual"
-        merged["auto"]["enabled"] = bool(merged["auto"].get("enabled"))
-        try:
-            iv = int(merged["auto"].get("interval_hours", 6))
-        except (TypeError, ValueError):
-            iv = 6
-        merged["auto"]["interval_hours"] = min(168, max(1, iv))
         merged["cli"]["command"] = merged["cli"].get("command") if merged["cli"].get("command") in ("claude", "codex") else "claude"
         kt = merged["keys"].get("gmail_transport")
         merged["keys"]["gmail_transport"] = kt if kt in ("imap", "api") else "imap"

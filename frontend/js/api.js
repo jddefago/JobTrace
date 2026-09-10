@@ -77,7 +77,7 @@ const Api = (() => {
     updateSyncConfig: (patch) => request("PUT", "/api/sync/config", patch),
     getSyncDoctor: (force) => request("GET", "/api/sync/doctor" + (force ? "?force=1" : "")),
     testImap: () => request("POST", "/api/sync/test-imap", {}),
-    runSyncNow: () => request("POST", "/api/sync/run", {}),
+    runSyncNow: (opts) => request("POST", "/api/sync/run", opts || {}),
 
     importCsv: async (csvText) => {
       const res = await fetch("/api/import/csv", {

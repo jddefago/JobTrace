@@ -1,17 +1,17 @@
 # Automatic Gmail Sync — Setup
 
-The tracker works with no Gmail sync at all. This covers the two **automatic**
-options; for the on-demand "ask your assistant to sync" path (no setup),
-see [GMAIL_SYNC.md](GMAIL_SYNC.md).
+The tracker works with no Gmail sync at all. This covers the two options that
+run **when you open JobTrace** (once a day); for the on-demand "ask your
+assistant to sync" path (no setup), see [GMAIL_SYNC.md](GMAIL_SYNC.md).
 
 Everything is configured from the dashboard: the **Gmail pill (top-right) →
 Settings**. That panel shows a live readiness checklist and the one fix for
 each gap. This file is the longer reference behind it.
 
-| | **Ask your assistant** | **Scheduled via CLI** | **Scheduled with your keys** |
+| | **Ask your assistant** | **On open, via the CLI** | **On open, with your keys** |
 |---|---|---|---|
 | Assistant app needed | Yes (its Gmail connector) | Yes (`claude`/`codex` CLI) | **No** |
-| Runs automatically | No | Yes | Yes |
+| Runs automatically | No | On dashboard open, ≤1×/day | On dashboard open, ≤1×/day |
 | Cost | your assistant plan | your assistant plan | **your Anthropic API key**, per run |
 | Setup | none | CLI sign-in + Gmail connector | one or two pasted secrets |
 
@@ -21,14 +21,16 @@ copy of the rules) and write the same local files. Gmail access is
 
 ---
 
-## Scheduled via the `claude` / `codex` CLI
+## On dashboard open, via the `claude` / `codex` CLI
 
-The running server shells out to the CLI on a timer. **This is the option
-with the most friction** — pick it only if you already run a Gmail MCP
-server in your CLI, or want to. Otherwise "ask your assistant" (no setup) or
-"scheduled with your keys" (below) are easier.
+When you open JobTrace, the running server shells out to the CLI (at most
+once a calendar day). **This is the option with the most friction** — pick
+it only if you already run a Gmail MCP server in your CLI, or want to.
+Otherwise "ask your assistant" (no setup) or "with your keys" (below) are
+easier.
 
-1. Settings → **"Scheduled via CLI"**, pick `claude` or `codex`.
+1. Settings → **"Sync when I open JobTrace — via the CLI"**, pick `claude`
+   or `codex`.
 2. The checklist flags two things you do once, in a terminal:
    - **Sign in:** run `claude` (or `codex`) and log in.
    - **Give the CLI a Gmail connector.** This is separate from connecting
@@ -42,8 +44,8 @@ server in your CLI, or want to. Otherwise "ask your assistant" (no setup) or
        OAuth — you end up doing the same Google Cloud OAuth-client setup as
        the "Google sign-in" transport below, just wired into the CLI instead
        of JobTrace.
-3. When the checklist is green, tick **"Run automatically"** and pick a
-   frequency. **"Sync now"** tests it.
+3. When the checklist is green, you're done — sync runs next time you open
+   JobTrace. **"Check now"** runs one immediately to test it.
 
 The CLI runs with `GMAIL_SYNC_TASK_PROMPT.md` as its instructions and a
 tool allow-list restricted to reading Gmail and running Python against the
@@ -51,16 +53,16 @@ repository — a crafted email can't get it to run arbitrary commands.
 
 ---
 
-## Scheduled with your own keys
+## On dashboard open, with your own keys
 
-The server runs the sync in-process — no CLI, no assistant app. You provide
-Gmail access and an Anthropic API key.
+The server runs the sync in-process when you open JobTrace (once a day) — no
+CLI, no assistant app. You provide Gmail access and an Anthropic API key.
 
 ### Anthropic API key
 
 <https://console.anthropic.com> → create a key. Paste it into Settings.
-Billed per run (typically cents — check the console after a couple of runs
-before scheduling it every few hours). Or set `ANTHROPIC_API_KEY` in the
+Billed per run (typically cents, and at most one automatic run a day — check
+the console after a couple of runs). Or set `ANTHROPIC_API_KEY` in the
 environment and leave the field blank.
 
 ```bash
@@ -116,19 +118,22 @@ dedup is identical across transports. Standard library only — no
 
 ### Turn it on
 
-Settings → **"Run automatically"** + a frequency. **"Sync now"** runs one
-immediately. `--dry-run` on the CLI logs intended actions without writing.
+Just pick **"Sync when I open JobTrace — with my API keys"** in Settings —
+that's the opt-in. Sync then runs the first time you open JobTrace each day.
+**"Check now"** runs one immediately. `--dry-run` on the CLI
+(`python3 backend/sync/agent.py --dry-run`) logs intended actions without
+writing.
 
 ---
 
-## Automatic sync only runs while JobTrace is open
+## When automatic sync runs
 
-The scheduler is part of the server process. For unattended coverage keep
-JobTrace running:
-
-- **macOS:** System Settings → General → Login Items → add the JobTrace
-  launcher.
-- **Windows:** put a shortcut in the Startup folder (`shell:startup`).
+There's no background timer and nothing to keep running. Sync fires when you
+open the dashboard, at most once per calendar day — a job tracker is only
+useful when you're looking at it, so that's when it refreshes. If your
+machine sleeps, restarts, or is off for a week, nothing special is needed:
+the next time you open JobTrace, it catches up. "Update" in the top bar runs
+one any time.
 
 ---
 

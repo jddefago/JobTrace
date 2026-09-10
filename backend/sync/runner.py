@@ -1,11 +1,12 @@
-"""In-process Gmail-sync scheduler.
+"""Gmail-sync runner + the dashboard-load trigger.
 
-Replaces the old launchd / Task Scheduler + shell-runner setup: the server
-is already a long-running process the user starts, so it just runs the sync
-itself on a timer when the user has opted in (method != "manual" and
-auto.enabled). One mechanism, both operating systems, no PATH/TCC/timeout
-shims, and every failure is surfaced in the dashboard instead of a logfile
-nobody opens.
+Earlier versions ran the sync on a schedule -- first an OS-level launchd /
+Task Scheduler job, then an in-server timer. Neither survives real machine
+use: people restart, sleep, and shut down. There is no schedule now. A sync
+fires when the dashboard is opened, at most once per calendar day
+(`autosync_due`), for whichever method is configured. The tracker is only
+useful when you look at it, and that's exactly when it refreshes. Every
+failure is surfaced in the dashboard instead of a logfile nobody opens.
 
 Two execution paths, by config method:
   "cli"  -> shell out to the `claude` / `codex` CLI with GMAIL_SYNC_TASK_PROMPT.md
@@ -21,7 +22,7 @@ import sys
 import threading
 
 from .. import database
-from . import config as sync_config, doctor as sync_doctor, state as sync_state
+from . import config as sync_config, doctor as sync_doctor
 
 BASE_DIR = database.BASE_DIR
 
@@ -85,6 +86,29 @@ def _record_run(entry):
 def last_run():
     runs = _load_runs()
     return runs[-1] if runs else None
+
+
+def synced_today(now=None):
+    """True if the most recent run (any trigger, success or failure) started
+    on today's local calendar date."""
+    lr = last_run()
+    if not lr:
+        return False
+    stamp = lr.get("startedAt") or lr.get("finishedAt")
+    if not stamp:
+        return False
+    try:
+        return datetime.date.fromisoformat(stamp[:10]) == (now or datetime.datetime.now()).date()
+    except ValueError:
+        return False
+
+
+def autosync_due(cfg, now=None):
+    """Should opening the dashboard kick off a sync? Only when a non-manual
+    method is configured and nothing has run yet today -- so a broken
+    sign-in gets one attempt a day, surfaced in the dashboard, not one per
+    page load."""
+    return cfg.get("method") in ("cli", "keys") and not synced_today(now=now)
 
 
 # ---------------------------------------------------------------------------
@@ -176,65 +200,18 @@ def _run_keys(cfg, log):
 
 
 # ---------------------------------------------------------------------------
-# Scheduler
+# Runner
 # ---------------------------------------------------------------------------
 
-class SyncScheduler:
+class SyncRunner:
     def __init__(self):
-        self._stop = threading.Event()
-        self._thread = None
         self._run_lock = threading.Lock()
         self._running = False
         self._log_lines = []
 
-    # -- lifecycle ---------------------------------------------------------
-    def start(self):
-        if self._thread and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(target=self._loop, name="jobtrace-sync", daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._stop.set()
-
     @property
     def is_running(self):
         return self._running
-
-    # -- the timer loop --------------------------------------------------
-    def _loop(self):
-        # Let the server settle before the first check.
-        if self._stop.wait(45):
-            return
-        while not self._stop.is_set():
-            try:
-                cfg = sync_config.load()
-                if cfg["method"] != "manual" and cfg["auto"]["enabled"] and self._is_due(cfg):
-                    self.run_now(trigger="schedule")
-            except Exception:
-                pass
-            # Re-check every 5 minutes; _is_due() enforces the real interval.
-            if self._stop.wait(300):
-                return
-
-    def _is_due(self, cfg):
-        interval = cfg["auto"]["interval_hours"] * 3600
-        marker = None
-        lr = last_run()
-        # A scheduled run — success OR failure — pushes the next attempt out a
-        # full interval. Intentional: no fast retry loop hammering a broken
-        # sign-in or a rate limit; the user waits for the next slot.
-        if lr and lr.get("trigger") == "schedule":
-            marker = lr.get("finishedAt")
-        if not marker:
-            marker = sync_state.load_sync_state().get("lastSuccessfulSync")
-        if not marker:
-            return True
-        try:
-            last_dt = datetime.datetime.fromisoformat(marker)
-        except ValueError:
-            return True
-        return (datetime.datetime.now() - last_dt).total_seconds() >= interval
 
     # -- run one sync --------------------------------------------------
     def run_now(self, trigger="manual"):
@@ -283,4 +260,4 @@ class SyncScheduler:
         return {"started": True}
 
 
-scheduler = SyncScheduler()
+runner = SyncRunner()

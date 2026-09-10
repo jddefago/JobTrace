@@ -260,7 +260,7 @@ def report(force=False):
     cfg = sync_config.load()
     data = {
         "method": cfg["method"],
-        "auto_enabled": cfg["auto"]["enabled"],
+        "auto_enabled": cfg["method"] != "manual",
         "cli": {name: _check_cli(name) for name in ("claude", "codex")},
         "keys": _check_keys(),
     }
@@ -271,12 +271,12 @@ def report(force=False):
     elif cfg["method"] == "cli":
         chosen = data["cli"].get(cfg["cli"]["command"], {})
         data["ready"] = bool(chosen.get("ready"))
-        data["headline"] = ("Ready to run scheduled syncs via the "
-                            f"{cfg['cli']['command']} CLI." if data["ready"]
+        data["headline"] = ("Ready — sync runs via the "
+                            f"{cfg['cli']['command']} CLI when you open JobTrace." if data["ready"]
                             else chosen.get("fix") or "The CLI isn't ready yet.")
     else:
         data["ready"] = data["keys"]["ready"]
-        data["headline"] = ("Ready to run scheduled syncs with your own keys."
+        data["headline"] = ("Ready — sync runs with your own keys when you open JobTrace."
                             if data["ready"] else (data["keys"]["fixes"][:1] or [""])[0])
 
     _CACHE.update(at=now, data=data)

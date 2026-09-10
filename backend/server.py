@@ -19,7 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend import constants, database, repository, validation
 from backend.sync import config as sync_config, doctor as sync_doctor, state as sync_state
-from backend.sync.scheduler import scheduler as sync_scheduler, last_run as sync_last_run
+from backend.sync.runner import (
+    runner as sync_runner, last_run as sync_last_run, autosync_due,
+)
 
 FRONTEND_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend"
@@ -232,9 +234,9 @@ def stats_analytics(handler, match, query, body):
 
 @route("GET", r"/api/gmail/sync-status")
 def gmail_sync_status(handler, match, query, body):
-    # The sync itself is done either by an AI assistant (manual), the local
-    # scheduler shelling out to a CLI, or the scheduler running the keys-based
-    # job in-process. All three write data/gmail_sync_state.json the same way.
+    # The sync itself is done either by an AI assistant (manual), the runner
+    # shelling out to a CLI, or the runner running the keys-based job
+    # in-process. All three write data/gmail_sync_state.json the same way.
     state = sync_state.load_sync_state()
     cfg = sync_config.load()
     return 200, {
@@ -244,9 +246,8 @@ def gmail_sync_status(handler, match, query, body):
         "unresolvedCount": len(sync_state.load_unresolved()),
         "processedMessageCount": len(state.get("processedMessageIds", [])),
         "method": cfg["method"],
-        "autoEnabled": cfg["auto"]["enabled"],
-        "intervalHours": cfg["auto"]["interval_hours"],
-        "running": sync_scheduler.is_running,
+        "autoEnabled": cfg["method"] != "manual",
+        "running": sync_runner.is_running,
         "lastRun": sync_last_run(),
     }
 
@@ -295,7 +296,14 @@ def sync_test_imap(handler, match, query, body):
 
 @route("POST", r"/api/sync/run")
 def sync_run_now(handler, match, query, body):
-    return 202, sync_scheduler.run_now_async(trigger="manual")
+    # ifStale: the dashboard-load auto-trigger. Runs only if a non-manual
+    # method is configured and nothing has synced yet today; otherwise a
+    # quiet no-op. Without the flag (the Update button) it always runs.
+    if (body or {}).get("ifStale"):
+        if not autosync_due(sync_config.load()):
+            return 202, {"started": False, "skipped": True}
+        return 202, sync_runner.run_now_async(trigger="dashboard")
+    return 202, sync_runner.run_now_async(trigger="manual")
 
 
 @route("GET", r"/api/export/json")
@@ -446,7 +454,6 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     database.ensure_data_dirs()
     database.get_connection()  # creates schema on first run
-    sync_scheduler.start()     # no-op until the user opts into automatic sync
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"JobTrace server running at http://{HOST}:{PORT}")
     print(f"Database: {database.DB_PATH}")

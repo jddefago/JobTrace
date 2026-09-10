@@ -1,11 +1,15 @@
 /* Gmail sync: status pill + a modal that both shows the last sync and,
    under "Settings", configures how sync runs.
 
-   Three ways to sync, chosen in Settings:
-     - Manual   : ask your AI assistant to sync (nothing to configure)
-     - CLI      : the local scheduler shells out to `claude` / `codex`
-     - Own keys : the scheduler runs it in-process (Gmail app password or
-                  Google OAuth, plus your Anthropic API key)
+   Three choices in Settings, each deciding *when* and *what runs*:
+     - Ask my assistant       : you say "sync my Gmail"; nothing automatic
+     - When I open JobTrace,
+       via the CLI            : on dashboard load (once/day), the server
+                                shells out to `claude` / `codex`
+     - When I open JobTrace,
+       with my API keys       : on dashboard load (once/day), the server
+                                runs it in-process (Gmail app password or
+                                Google OAuth, plus your Anthropic API key)
    The tracker works fully without any of this. */
 
 const GmailSync = (() => {
@@ -196,8 +200,8 @@ const GmailSync = (() => {
 
     body.appendChild(Utils.el("p", { class: "gmail-sync-note" },
       status.method === "manual"
-        ? "Email is checked when you ask your AI assistant to (\"sync my Gmail\"). Turn on automatic checks under Settings."
-        : `Automatic checks are ${status.autoEnabled ? "on" : "off"} (${status.method}, every ${status.intervalHours}h). Configure them under Settings.`));
+        ? "Email is checked when you ask your AI assistant to (\"sync my Gmail\"). Switch to an automatic method under Settings."
+        : `Email is checked automatically when you open JobTrace, at most once a day (${status.method}). Change this under Settings.`));
   }
 
   // ---- settings view ----------------------------------------------
@@ -211,9 +215,9 @@ const GmailSync = (() => {
   function methodRadios() {
     const wrap = Utils.el("div", { class: "sync-method-radios" });
     for (const [val, label, hint] of [
-      ["manual", "Ask my assistant", "You say “sync my Gmail”. No setup."],
-      ["cli", "Scheduled via CLI", "The claude / codex CLI, signed in with a Gmail connector."],
-      ["keys", "Scheduled with my keys", "Your own Gmail access + Anthropic API key. Runs unattended."],
+      ["manual", "Ask my assistant", "You say “sync my Gmail”. Nothing automatic, no setup."],
+      ["cli", "Sync when I open JobTrace — via the CLI", "On open (once a day), the server runs the claude / codex CLI, signed in with a Gmail connector."],
+      ["keys", "Sync when I open JobTrace — with my API keys", "On open (once a day), the server runs it in-process with your Gmail access + Anthropic API key. No assistant app."],
     ]) {
       const id = `sync-method-${val}`;
       const radio = Utils.el("input", { type: "radio", name: "sync-method", id, value: val });
@@ -230,28 +234,15 @@ const GmailSync = (() => {
     return wrap;
   }
 
-  function autoToggleBlock() {
+  function syncOptionsBlock() {
     const wrap = Utils.el("div", { class: "sync-auto-block" });
-    const toggle = Utils.el("input", { type: "checkbox", id: "sync-auto-enabled" });
-    toggle.checked = !!cfg.auto.enabled;
-    toggle.addEventListener("change", () => saveConfig({ auto: { enabled: toggle.checked } }));
-    wrap.appendChild(Utils.el("label", { class: "sync-inline" }, [toggle, Utils.el("span", {}, "Run automatically in the background")]));
-
-    const intervalSel = Utils.el("select", { id: "sync-interval" });
-    for (const h of [3, 6, 8, 12, 24]) {
-      const o = Utils.el("option", { value: String(h) }, `every ${h} hours`);
-      if (Number(cfg.auto.interval_hours) === h) o.selected = true;
-      intervalSel.appendChild(o);
-    }
-    intervalSel.addEventListener("change", () => saveConfig({ auto: { interval_hours: Number(intervalSel.value) } }));
-    wrap.appendChild(Utils.el("label", { class: "sync-inline" }, [Utils.el("span", {}, "Frequency"), intervalSel]));
 
     const ws = Utils.el("input", { type: "checkbox", id: "sync-websearch" });
     ws.checked = cfg.keys.enable_web_search !== false;
     ws.addEventListener("change", () => saveConfig({ keys: { enable_web_search: ws.checked } }));
     wrap.appendChild(Utils.el("label", { class: "sync-inline" }, [ws, Utils.el("span", {}, "Let the sync look up job location / link on the web")]));
 
-    wrap.appendChild(Utils.el("p", { class: "sync-fineprint" }, "Automatic sync only runs while JobTrace is open. Add JobTrace to your login items to keep it running."));
+    wrap.appendChild(Utils.el("p", { class: "sync-fineprint" }, "Runs once when you open JobTrace, at most once a day. No background timer — nothing needs to stay running. Use “Check now” below any time."));
     return wrap;
   }
 
@@ -273,7 +264,7 @@ const GmailSync = (() => {
       if (d.fix) wrap.appendChild(Utils.el("p", { class: "sync-fix" }, d.fix));
       if (d.note) wrap.appendChild(Utils.el("p", { class: "sync-fineprint" }, d.note));
     }
-    wrap.appendChild(autoToggleBlock());
+    wrap.appendChild(syncOptionsBlock());
     return wrap;
   }
 
@@ -340,7 +331,7 @@ const GmailSync = (() => {
     wrap.appendChild(Utils.el("div", { class: "sync-secret-actions" }, [
       Utils.el("button", { class: "btn btn-primary btn-sm", type: "button", onclick: saveSecrets }, "Save keys"),
     ]));
-    wrap.appendChild(autoToggleBlock());
+    wrap.appendChild(syncOptionsBlock());
     return wrap;
   }
 

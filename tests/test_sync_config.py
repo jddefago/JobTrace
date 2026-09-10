@@ -11,22 +11,28 @@ class SyncConfigTests(SyncConfigTestCase):
     def test_defaults_when_no_file(self):
         cfg = sync_config.load()
         self.assertEqual("manual", cfg["method"])
-        self.assertFalse(cfg["auto"]["enabled"])
+        self.assertNotIn("auto", cfg)  # no timer, no interval — dropped entirely
 
     def test_update_merges_and_persists(self):
-        sync_config.update({"method": "cli", "auto": {"enabled": True}})
+        sync_config.update({"method": "cli", "cli": {"command": "codex"}})
         cfg = sync_config.load()
         self.assertEqual("cli", cfg["method"])
-        self.assertTrue(cfg["auto"]["enabled"])
-        self.assertEqual(6, cfg["auto"]["interval_hours"])  # untouched default kept
+        self.assertEqual("codex", cfg["cli"]["command"])
+        self.assertEqual(30, cfg["keys"]["lookback_days"])  # untouched default kept
 
     def test_invalid_method_falls_back_to_manual(self):
         sync_config.update({"method": "nonsense"})
         self.assertEqual("manual", sync_config.load()["method"])
 
-    def test_interval_is_clamped(self):
-        sync_config.update({"auto": {"interval_hours": 9999}})
-        self.assertEqual(168, sync_config.load()["auto"]["interval_hours"])
+    def test_a_stale_auto_block_in_the_file_is_pruned_on_next_write(self):
+        # An install upgraded from the timer era has {"auto": {...}} on disk.
+        with open(sync_config.CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"method": "keys", "auto": {"enabled": True, "interval_hours": 6}}, f)
+        sync_config.update({"keys": {"model": "claude-x"}})
+        with open(sync_config.CONFIG_PATH) as f:
+            raw = json.load(f)
+        self.assertNotIn("auto", raw)
+        self.assertEqual("keys", raw["method"])
 
     def test_get_public_masks_secrets(self):
         sync_config.update({"keys": {"anthropic_api_key": "sk-ant-secret",

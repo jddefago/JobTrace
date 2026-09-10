@@ -118,10 +118,18 @@ class ServerSmokeTests(unittest.TestCase):
         self.assertEqual(404, status)
 
     def test_sync_config_put_roundtrip(self):
-        status, _ = self._req("PUT", "/api/sync/config", {"auto": {"interval_hours": 12}})
+        status, _ = self._req("PUT", "/api/sync/config", {"cli": {"command": "codex"}})
         self.assertEqual(200, status)
         status, cfg = self._req("GET", "/api/sync/config")
-        self.assertEqual(12, cfg["auto"]["interval_hours"])
+        self.assertEqual("codex", cfg["cli"]["command"])
+        self.assertNotIn("auto", cfg)
+
+    def test_run_if_stale_is_a_no_op_for_the_manual_method(self):
+        self._req("PUT", "/api/sync/config", {"method": "manual"})
+        status, body = self._req("POST", "/api/sync/run", {"ifStale": True})
+        self.assertEqual(202, status)
+        self.assertFalse(body["started"])
+        self.assertTrue(body["skipped"])
 
 
 if __name__ == "__main__":

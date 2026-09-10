@@ -9,8 +9,8 @@ plain HTML/CSS/JS frontend, backed by a single SQLite file.
 
 **Optional Gmail sync** reads your inbox for recruiter replies and updates
 the tracker. It's off by default, has three setup levels (from "ask your AI
-assistant" with zero setup, to fully unattended), and nothing leaves your
-machine unless you turn it on — see
+assistant" with zero setup, to a sync that runs whenever you open JobTrace),
+and nothing leaves your machine unless you turn it on — see
 [Gmail synchronization](#gmail-synchronization).
 
 ## Getting started
@@ -65,9 +65,9 @@ JobTrace/
 │   ├── constants.py     # allowed stages / outcomes / sources / event types
 │   └── sync/            # Gmail synchronization
 │       ├── state.py     #   data/gmail_sync_state.json + unresolved items
-│       ├── config.py    #   data/sync_config.json (method, schedule, secrets)
+│       ├── config.py    #   data/sync_config.json (method, secrets)
 │       ├── doctor.py    #   "can automatic sync run, and what's missing?"
-│       ├── scheduler.py #   in-process timer + the two execution paths
+│       ├── runner.py    #   dashboard-load trigger + the two execution paths
 │       ├── agent.py     #   the keys-based sync agent (Anthropic API)
 │       └── imap.py      #   read-only Gmail over an app password
 ├── frontend/
@@ -91,12 +91,12 @@ JobTrace/
 ├── stop.command  / stop.bat    # stop the server
 ├── run_tests.command           # python3 -m unittest discover tests
 ├── start_hidden.vbs            # Windows: no-window wrapper around start.bat
-├── requirements.txt      # only for the "scheduled with your keys" sync path
+├── requirements.txt      # only for the "on open, with your keys" sync path
 ├── SYSTEM_BRIEF.pdf      # plain-language walkthrough for a non-technical reader
 ├── SETUP.md              # setup guide for a fresh AI assistant session
 ├── GMAIL_SYNC.md         # the sync policy every method follows
 ├── GMAIL_SYNC_TASK_PROMPT.md    # prompt the CLI method / a manual paste uses
-├── GMAIL_SYNC_SETUP.md   # reference for the two automatic sync options
+├── GMAIL_SYNC_SETUP.md   # reference for the two sync-on-open options
 └── README.md
 ```
 
@@ -123,7 +123,7 @@ To recreate either by hand, just re-run `setup.*`.
   [Starting the app](#starting-the-app))
 - **Python 3.9+** (uses only the standard library — `http.server`,
   `sqlite3`, `csv`, `json`; nothing to `pip install` to run the app or the
-  manual/assistant-driven Gmail sync — only the optional headless API sync
+  manual/assistant-driven Gmail sync — only the optional keys-based sync
   path needs real dependencies, see
   [Gmail synchronization](#gmail-synchronization))
 - Any modern browser (Chrome, Edge, Firefox, Safari)
@@ -132,8 +132,8 @@ To recreate either by hand, just re-run `setup.*`.
 ## Installing dependencies
 
 None — for the app, the Tracker, the assistant-driven Gmail sync, and the
-CLI-driven scheduled sync. `requirements.txt` is only for the "scheduled
-with your keys" sync option (see
+CLI-driven sync. `requirements.txt` is only for the "on open, with your
+keys" sync option (see
 [Gmail synchronization](#gmail-synchronization)), and even then the default
 IMAP path needs just `anthropic`. Just make sure Python is installed:
 
@@ -256,11 +256,11 @@ a live readiness checklist. Once a method is set up, click **Update** in the
 top bar to sync on demand and refresh the dashboard. Full reference:
 **[GMAIL_SYNC_SETUP.md](GMAIL_SYNC_SETUP.md)**.
 
-| | **Ask your assistant** | **Scheduled via CLI** | **Scheduled with your keys** |
+| | **Ask your assistant** | **On open, via the CLI** | **On open, with your keys** |
 |---|---|---|---|
-| How it works | You say "sync my Gmail"; it reads Gmail via its own connector | The server runs `claude`/`codex` on a timer | The server runs the sync in-process |
+| How it works | You say "sync my Gmail"; it reads Gmail via its own connector | Opening JobTrace runs `claude`/`codex` (once a day) | Opening JobTrace runs the sync in-process (once a day) |
 | Assistant app | Yes (its Gmail connector) | Yes (`claude`/`codex` CLI, signed in, Gmail connector added) | **No** |
-| Runs automatically | No | Yes | Yes |
+| Runs automatically | No | On dashboard open, ≤1×/day | On dashboard open, ≤1×/day |
 | Cost | your plan | your plan | **your Anthropic API key**, per run |
 | Setup | none | CLI sign-in + a Gmail connector on the CLI | Anthropic key + Gmail (Google sign-in, or an app password) |
 
@@ -272,10 +272,12 @@ mix freely.
   a "lessons from the first sync" section — e.g. Gmail search excludes Trash
   by default). The keys-based agent reads it at runtime, so there's one copy
   of the rules. Ask your assistant to "sync Gmail" and point it here.
-- **Automatic sync runs in the server process** — no launchd, no Task
-  Scheduler. It only runs while JobTrace is open, so add the launcher to
-  your login items for unattended coverage.
-- **"Scheduled with your keys"** takes Gmail either way: **Google sign-in**
+- **Automatic sync is triggered by opening the dashboard** — no launchd, no
+  Task Scheduler, no background timer to keep alive. The first time you open
+  JobTrace on a given day, it runs one sync (a job tracker is only useful
+  when you look at it, and that's when it refreshes). "Update" in the top bar
+  runs one any time.
+- **"On open, with your keys"** takes Gmail either way: **Google sign-in**
   (OAuth, `gmail.readonly` scope, revocable — recommended, but needs a
   one-time Google Cloud OAuth client) or a **Gmail app password** (no Cloud
   console, but can't be scoped read-only — a trade-off the Settings panel

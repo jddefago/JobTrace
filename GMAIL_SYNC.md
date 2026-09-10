@@ -16,10 +16,11 @@ application updates," read this whole document before touching anything.
   each email means, and write the result directly into JobTrace's local
   files using the tools described below.
 - These are the rules for **one sync run**. They're identical whether the
-  run is you (asked directly), the scheduler shelling out to a CLI with
-  `GMAIL_SYNC_TASK_PROMPT.md`, or `backend/sync/agent.py` (which reads
-  this file as its system prompt). Automatic runs only happen if the user
-  turned them on in the dashboard — don't assume one is active.
+  run is you (asked directly), the server shelling out to a CLI with
+  `GMAIL_SYNC_TASK_PROMPT.md` when the dashboard is opened, or
+  `backend/sync/agent.py` (which reads this file as its system prompt).
+  Automatic runs only happen if the user picked an automatic method in the
+  dashboard — don't assume one is active.
 - Gmail access is **read-only**. Never send, draft, forward, delete,
   archive, label, unlabel, mark read/unread, or otherwise modify anything
   in Gmail. Only search and read.
@@ -486,5 +487,7 @@ context.
    right) and the "Unresolved items" list if any exist.
 
 This document is the sync *policy*, not a setup task. If the user wants
-automatic sync, don't build your own scheduler or cron job — point them at
-the dashboard's Gmail sync settings (see SETUP.md), which already does it.
+automatic sync, don't build your own scheduler, cron job, or OS scheduled
+task — point them at the dashboard's Gmail sync settings (see SETUP.md).
+Picking "via the CLI" or "with my API keys" there makes a sync run whenever
+they open JobTrace, once a day.

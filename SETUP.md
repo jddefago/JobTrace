@@ -52,6 +52,11 @@ JobTrace has **no Gmail integration of its own.** There are three ways to
 sync it. **Ask the user which they want; default to A** unless they
 specifically want it to run automatically.
 
+B and C run automatically **when the user opens the dashboard**, at most
+once per calendar day (a job tracker is only useful when looked at, so
+there's no background timer — nothing has to stay running). "Update" in the
+top bar, and "Check now" in Settings, run one any time.
+
 All three write the same local files (`data/applications.db`,
 `data/gmail_sync_state.json`, `data/unresolved_gmail_items.json`) following
 the same rules, so they can be mixed.
@@ -69,18 +74,17 @@ the same rules, so they can be mixed.
 Needs only that your assistant app has Gmail access (Claude Desktop: connect
 Gmail in its settings). Nothing to install, identical on macOS and Windows,
 nothing runs unless asked. **This is the low-friction path — steer here
-unless the user wants unattended sync.**
+unless the user wants sync to happen without being asked.**
 
-### B. Automatic via the `claude` / `codex` CLI · free, more moving parts
+### B. On dashboard open, via the `claude` / `codex` CLI · free, more moving parts
 
-JobTrace's own scheduler (in the running server) shells out to the CLI on a
-timer. Configure it in the dashboard — **Gmail pill (top-right) → Settings →
-"Scheduled via CLI"** — which shows a live readiness checklist. Or drive it
-over the API:
+When the user opens JobTrace (once a day), the running server shells out to
+the CLI. Configure it in the dashboard — **Gmail pill (top-right) → Settings
+→ "Sync when I open JobTrace — via the CLI"** — which shows a live readiness
+checklist. Or drive it over the API:
 
 ```
-PUT /api/sync/config   {"method":"cli","cli":{"command":"claude"},
-                        "auto":{"enabled":true,"interval_hours":6}}
+PUT /api/sync/config   {"method":"cli","cli":{"command":"claude"}}
 GET /api/sync/doctor    -> tells you exactly what's still missing
 POST /api/sync/run      -> run once now
 ```
@@ -101,9 +105,10 @@ of which you can complete from a sandboxed session**:
 `GET /api/sync/doctor` reports both. If not `ready`, name the red item and
 its fix, then move on.
 
-### C. Automatic with your own keys · no CLI, no assistant app
+### C. On dashboard open, with your own keys · no CLI, no assistant app
 
-The scheduler runs the sync in-process. Needs an **Anthropic API key**
+The server runs the sync in-process (on open, once a day). Needs an
+**Anthropic API key**
 (<https://console.anthropic.com>, billed per run — confirm the user is OK)
 and Gmail access — one of two transports:
 
@@ -120,25 +125,28 @@ and Gmail access — one of two transports:
   controls; make sure they know they can revoke it. Only `anthropic` to
   install.
 
-Set it up in the dashboard (**Settings → "Scheduled with my keys"**) or via
-API:
+Set it up in the dashboard (**Settings → "Sync when I open JobTrace — with
+my API keys"**) or via API:
 
 ```
 PUT /api/sync/config  {"method":"keys","keys":{
     "gmail_transport":"api",        # or "imap"
     "gmail_address":"…","gmail_app_password":"…",   # imap only
-    "anthropic_api_key":"…"},"auto":{"enabled":true,"interval_hours":6}}
+    "anthropic_api_key":"…"}}
 POST /api/sync/run
 ```
 
 Full walkthrough: **[GMAIL_SYNC_SETUP.md](GMAIL_SYNC_SETUP.md)**.
 
-### Automatic sync only runs while the server runs
+### When automatic sync runs
 
-The scheduler lives in the server process. For unattended coverage the user
-should keep JobTrace running — add the desktop launcher to Login Items
-(macOS: System Settings → General → Login Items) or the Startup folder
-(Windows). Say this; don't assume it.
+Picking method B or C *is* the opt-in — there's no separate "enable" switch
+and no interval to set. The server runs one sync the first time the
+dashboard is opened each day (`POST /api/sync/run` with `{"ifStale":true}`,
+which the frontend does on load; it's a no-op if a run already happened
+today or the method is `manual`). A machine that sleeps, restarts, or stays
+off for days needs no special handling — the next time JobTrace is opened,
+it catches up. No launchd, no Task Scheduler, no login-items setup.
 
 ---
 
@@ -152,6 +160,7 @@ Plainly:
 - What's left for the user to do themselves — CLI sign-in, adding the CLI
   Gmail connector, generating an app password, `pip install`.
 
-**Never say automatic sync is "on" unless `GET /api/sync/doctor` returns
-`ready: true` and you enabled it.** For the manual path, never say it's
-"active" — it runs only when asked.
+**Never say automatic sync will work unless `GET /api/sync/doctor` returns
+`ready: true` for the configured method.** Once it does, sync runs the next
+time the user opens JobTrace (and once a day after). For the manual path,
+never say it's "active" — it runs only when asked.

@@ -43,10 +43,28 @@ function syncResultMessage(status) {
   return parts.length ? `Dashboard updated — ${parts.join(", ")}` : "Dashboard updated";
 }
 
-/* Shared by the top-bar Update button and the "Sync now" button in the
-   Email status modal: kick off a sync, keep a sticky progress toast up
-   while it runs, then refresh every view and resolve the toast. */
-async function runSyncWithProgress({ onRefreshed } = {}) {
+/* Shared by the top-bar Update button, the "Sync now" button in the Email
+   status modal, and the once-a-day trigger on dashboard load. Kick off a
+   sync, keep a sticky progress toast up while it runs, then refresh every
+   view and resolve the toast.
+
+   ifStale: the on-load trigger. The server decides whether to run (a method
+   is configured and nothing synced today); if it declines, this is a silent
+   no-op — no toast, no error. */
+async function runSyncWithProgress({ onRefreshed, ifStale = false } = {}) {
+  let res;
+  try {
+    res = await Api.runSyncNow(ifStale ? { ifStale: true } : {});
+  } catch (err) {
+    if (!ifStale) Utils.progressToast("Checking for updates").fail(err.message || "Update failed");
+    return;
+  }
+  if (!res.started) {
+    if (ifStale) return;   // already synced today, or manual method — nothing to show
+    Utils.progressToast("Checking for updates").fail(res.error || "Could not start the update");
+    return;
+  }
+
   let firstSync = false;
   try {
     const summary = await Api.getSummary();
@@ -55,11 +73,6 @@ async function runSyncWithProgress({ onRefreshed } = {}) {
 
   const prog = Utils.progressToast(firstSync ? "Running initial data pull" : "Checking for updates");
   try {
-    const res = await Api.runSyncNow();
-    if (!res.started) {
-      prog.fail(res.error || "Could not start the update");
-      return;
-    }
     const status = await waitForSyncToFinish();
     await Dashboard.refresh();
     if (typeof Tracker !== "undefined") Tracker.refresh();
@@ -138,6 +151,10 @@ async function bootstrap() {
   Analytics.init();
   ImportExport.init();
   GmailSync.init();
+
+  // Once-a-day email sync, triggered by opening the dashboard. Server-gated
+  // and a silent no-op unless it's actually due — see runSyncWithProgress.
+  runSyncWithProgress({ ifStale: true }).catch(() => {});
 }
 
 document.addEventListener("DOMContentLoaded", bootstrap);
